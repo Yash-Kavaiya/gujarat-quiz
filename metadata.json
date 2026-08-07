@@ -1,0 +1,6 @@
+{
+  "name": "Gujarat Quiz",
+  "description": "Bilingual exam-prep quiz platform for GPSC, GSSSB, Talati, PSI, TET/TAT, and Gujarat government exams with coin economy, 1v1 duels, mock tests, and study capsules.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

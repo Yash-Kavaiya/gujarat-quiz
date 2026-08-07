@@ -1,0 +1,20 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Outer Gold Coin Ring -->
+    <path
+        android:fillColor="#FFD700"
+        android:pathData="M54,24 A30,30 0 1,1 53.99,24 Z" />
+    <path
+        android:fillColor="#FFA500"
+        android:pathData="M54,28 A26,26 0 1,1 53.99,28 Z" />
+    <path
+        android:fillColor="#FFE55C"
+        android:pathData="M54,32 A22,22 0 1,1 53.99,32 Z" />
+    <!-- Center 'G' Emblem -->
+    <path
+        android:fillColor="#B35900"
+        android:pathData="M58,42 C51,42 45,47 45,54 C45,61 51,66 58,66 C63,66 67,63 68,58 L57,58 L57,53 L73,53 C73.5,55 74,57 74,59 C74,68 67,72 58,72 C43,72 39,61 39,54 C39,43 47,36 58,36 C64,36 69,38 72,41 L68,45 C65,43 62,42 58,42 Z" />
+</vector>
