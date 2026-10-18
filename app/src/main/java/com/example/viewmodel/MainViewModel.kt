@@ -82,10 +82,12 @@ data class DuelState(
 class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val repository: AppRepository
+    private val preferencesRepository: UserPreferencesRepository
 
     init {
         val dao = AppDatabase.getDatabase(application).appDao()
         repository = AppRepository(dao)
+        preferencesRepository = UserPreferencesRepository(application)
 
         viewModelScope.launch {
             repository.userProfile.collect { profile ->
@@ -95,10 +97,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     if (!profile.onboardingCompleted) {
                         _currentScreen.value = Screen.ONBOARDING
                     }
+                    preferencesRepository.saveCoinsAndStreak(profile.coins, profile.streakDays)
                 } else {
                     // Seed initial user profile
                     val initialProfile = UserProfileEntity()
                     repository.saveUserProfile(initialProfile)
+                    preferencesRepository.saveCoinsAndStreak(initialProfile.coins, initialProfile.streakDays)
                     // Seed initial transactions
                     repository.addTransaction(TransactionEntity(title = "Signup bonus", timeAgo = "2d ago", amount = 500))
                     repository.addTransaction(TransactionEntity(title = "Daily login streak · D7", timeAgo = "1d ago", amount = 100))
@@ -110,12 +114,32 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
         }
+
+        viewModelScope.launch {
+            repository.seedLeaderboardIfEmpty()
+        }
     }
 
     private val _userProfile = MutableStateFlow(UserProfileEntity())
     val userProfile: StateFlow<UserProfileEntity> = _userProfile.asStateFlow()
 
     val transactions: StateFlow<List<TransactionEntity>> = repository.transactions
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val leaderboardUsers: StateFlow<List<LeaderboardUser>> = repository.leaderboardEntries
+        .map { list ->
+            list.sortedByDescending { it.totalScore }.mapIndexed { idx, item ->
+                LeaderboardUser(
+                    rank = idx + 1,
+                    name = item.name,
+                    initials = item.initials,
+                    city = item.city,
+                    score = item.totalScore,
+                    delta = item.delta,
+                    isCurrentUser = item.isCurrentUser
+                )
+            }
+        }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     private val _activeTheme = MutableStateFlow("Saffron")
@@ -149,6 +173,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val duelState: StateFlow<DuelState> = _duelState.asStateFlow()
 
     fun navigateTo(screen: Screen) {
+        _currentScreen.value = screen
+        if (screen == Screen.HOME) _currentBottomTab.value = 0
+        if (screen == Screen.CATEGORIES) _currentBottomTab.value = 1
+        if (screen == Screen.COMPETE) _currentBottomTab.value = 2
+        if (screen == Screen.PROFILE) _currentBottomTab.value = 3
+    }
+
+    fun setCurrentScreenFromNav(screen: Screen) {
         _currentScreen.value = screen
         if (screen == Screen.HOME) _currentBottomTab.value = 0
         if (screen == Screen.CATEGORIES) _currentBottomTab.value = 1
@@ -365,7 +397,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             accuracyPercentage = newAcc
         )
         _userProfile.value = updated
-        viewModelScope.launch { repository.saveUserProfile(updated) }
+        val pointsGained = correct * 25
+        viewModelScope.launch {
+            repository.saveUserProfile(updated)
+            repository.updateUserQuizScore(pointsGained, updated.name, updated.city, updated.initials)
+        }
 
         _quizState.value = current.copy(
             quizCompleted = true,
@@ -462,6 +498,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             addCoins(1000, "Mock Test High Score")
         }
 
+        val mockPoints = (score * 5).toInt().coerceAtLeast(0)
+        if (mockPoints > 0) {
+            viewModelScope.launch {
+                val profile = _userProfile.value
+                repository.updateUserQuizScore(mockPoints, profile.name, profile.city, profile.initials)
+            }
+        }
+
         _quizState.value = QuizState(
             quizCompleted = true,
             isWinState = score > 100,
@@ -543,6 +587,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 winnerName = if (isUserWin) "You" else current.friend?.name ?: "Opponent"
             )
             showToast(if (isUserWin) "Victory! You won 200 coins!" else "Match over!")
+
+            _quizState.value = QuizState(
+                quizCompleted = true,
+                isWinState = isUserWin,
+                scorePercentage = if (isUserWin) 100 else ((current.userScore.toFloat() / (current.questions.size * 10)) * 100).toInt().coerceIn(0, 100),
+                correctCount = current.userScore / 10,
+                totalCount = current.questions.size,
+                coinsEarnedInQuiz = if (isUserWin) 200 else 0
+            )
+            _currentScreen.value = Screen.RESULTS
         }
     }
 

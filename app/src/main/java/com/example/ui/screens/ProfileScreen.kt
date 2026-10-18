@@ -27,6 +27,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.TransactionEntity
 import com.example.data.UserProfileEntity
+import com.example.ui.components.DynamicCoinBalanceCard
 import com.example.ui.components.GoldCoinIcon
 import com.example.ui.theme.DisplayFontFamily
 import com.example.ui.theme.LocalAppColors
@@ -84,51 +85,17 @@ fun ProfileScreen(
             }
         }
 
-        // Coin Vault Header Card
+        // Dynamic Coin Vault Balance Card
         item {
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 20.dp),
-                shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(containerColor = colors.ink)
-            ) {
-                Column(modifier = Modifier.padding(20.dp)) {
-                    Text(
-                        text = "COIN VAULT BALANCE",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 1.5.sp,
-                        color = Color.White.copy(alpha = 0.7f)
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            GoldCoinIcon(sizeDp = 36)
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Text(
-                                text = "%,d".format(profile.coins),
-                                fontSize = 36.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = colors.accentGold
-                            )
-                        }
-                        Button(
-                            onClick = onOpenCoinShop,
-                            colors = ButtonDefaults.buttonColors(containerColor = colors.primary),
-                            shape = RoundedCornerShape(12.dp)
-                        ) {
-                            Icon(Icons.Default.ShoppingCart, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Get Coins", fontWeight = FontWeight.Bold)
-                        }
-                    }
-                }
-            }
+            DynamicCoinBalanceCard(
+                coinBalance = profile.coins,
+                accuracyPercentage = profile.accuracyPercentage,
+                streakDays = profile.streakDays,
+                totalQuizzes = profile.totalQuizzes,
+                onEarnMoreClick = onOpenCoinShop,
+                onOpenShopClick = onOpenCoinShop,
+                modifier = Modifier.padding(horizontal = 20.dp)
+            )
         }
 
         // Theme Switcher Section

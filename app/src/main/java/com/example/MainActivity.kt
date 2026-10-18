@@ -3,6 +3,7 @@ package com.example
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
@@ -23,6 +24,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.navigation.NavController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
@@ -63,6 +65,22 @@ fun Screen.toRoute(): String = when (this) {
     Screen.DUEL_CHALLENGE -> Routes.DUEL_CHALLENGE
 }
 
+fun String.toScreen(): Screen = when (this) {
+    Routes.ONBOARDING -> Screen.ONBOARDING
+    Routes.HOME -> Screen.HOME
+    Routes.CATEGORIES -> Screen.CATEGORIES
+    Routes.COMPETE -> Screen.COMPETE
+    Routes.PROFILE -> Screen.PROFILE
+    Routes.QUIZ_PLAY -> Screen.QUIZ_PLAY
+    Routes.RESULTS -> Screen.RESULTS
+    Routes.MOCK_TEST -> Screen.MOCK_TEST
+    Routes.COIN_SHOP -> Screen.COIN_SHOP
+    Routes.STREAK_CALENDAR -> Screen.STREAK_CALENDAR
+    Routes.CAPSULES -> Screen.CAPSULES
+    Routes.DUEL_CHALLENGE -> Screen.DUEL_CHALLENGE
+    else -> Screen.HOME
+}
+
 class MainActivity : ComponentActivity() {
 
     private val viewModel: MainViewModel by viewModels()
@@ -96,12 +114,33 @@ fun MainAppContent(viewModel: MainViewModel) {
     val duelState by viewModel.duelState.collectAsState()
     val showReferralSheet by viewModel.showReferralSheet.collectAsState()
     val toastMessage by viewModel.toastMessage.collectAsState()
+    val leaderboardUsers by viewModel.leaderboardUsers.collectAsState()
 
     val colors = LocalAppColors.current
 
     val navController = rememberNavController()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route ?: Routes.HOME
+
+    DisposableEffect(navController) {
+        val listener = NavController.OnDestinationChangedListener { _, destination, _ ->
+            val route = destination.route ?: return@OnDestinationChangedListener
+            val screen = route.toScreen()
+            if (viewModel.currentScreen.value != screen) {
+                viewModel.setCurrentScreenFromNav(screen)
+            }
+        }
+        navController.addOnDestinationChangedListener(listener)
+        onDispose {
+            navController.removeOnDestinationChangedListener(listener)
+        }
+    }
+
+    BackHandler(enabled = currentRoute != Routes.HOME && currentRoute != Routes.ONBOARDING) {
+        if (!navController.popBackStack()) {
+            viewModel.navigateTo(Screen.HOME)
+        }
+    }
 
     LaunchedEffect(toastMessage) {
         toastMessage?.let { msg ->
@@ -225,6 +264,7 @@ fun MainAppContent(viewModel: MainViewModel) {
                 composable(Routes.COMPETE) {
                     CompeteScreen(
                         userCoins = userProfile.coins,
+                        leaderboardUsers = leaderboardUsers,
                         onStartDailyChallenge = { viewModel.startDailyChallenge() },
                         onStartDuel = { friend -> viewModel.startDuelChallenge(friend) },
                         onOpenMockTest = { viewModel.startMockTest() }
@@ -249,7 +289,7 @@ fun MainAppContent(viewModel: MainViewModel) {
                         onSelectOption = { viewModel.selectQuizOption(it) },
                         onUseHint = { viewModel.useQuizHint() },
                         onNextQuestion = { viewModel.nextQuizQuestion() },
-                        onBack = { viewModel.navigateTo(Screen.HOME) }
+                        onBack = { if (!navController.popBackStack()) viewModel.navigateTo(Screen.HOME) }
                     )
                 }
 
@@ -274,7 +314,7 @@ fun MainAppContent(viewModel: MainViewModel) {
                         onSetPaletteOpen = { viewModel.setMockPaletteOpen(it) },
                         onSetSubmitModalOpen = { viewModel.setMockSubmitModalOpen(it) },
                         onSubmitMockTest = { viewModel.submitMockTest() },
-                        onBack = { viewModel.navigateTo(Screen.COMPETE) }
+                        onBack = { if (!navController.popBackStack()) viewModel.navigateTo(Screen.COMPETE) }
                     )
                 }
 
@@ -283,7 +323,7 @@ fun MainAppContent(viewModel: MainViewModel) {
                         userCoins = userProfile.coins,
                         onBuyCoinPack = { pack -> viewModel.buyCoinPack(pack) },
                         onBuyPowerUp = { powerUp -> viewModel.buyPowerUp(powerUp) },
-                        onBack = { viewModel.navigateTo(Screen.PROFILE) }
+                        onBack = { if (!navController.popBackStack()) viewModel.navigateTo(Screen.PROFILE) }
                     )
                 }
 
@@ -292,13 +332,13 @@ fun MainAppContent(viewModel: MainViewModel) {
                         profile = userProfile,
                         onBuyFreeze = { viewModel.buyStreakFreeze() },
                         onClaimMilestone = { days, coins -> viewModel.claimMilestone(days, coins) },
-                        onBack = { viewModel.navigateTo(Screen.HOME) }
+                        onBack = { if (!navController.popBackStack()) viewModel.navigateTo(Screen.HOME) }
                     )
                 }
 
                 composable(Routes.CAPSULES) {
                     CapsulesScreen(
-                        onBack = { viewModel.navigateTo(Screen.HOME) }
+                        onBack = { if (!navController.popBackStack()) viewModel.navigateTo(Screen.HOME) }
                     )
                 }
 
@@ -309,7 +349,7 @@ fun MainAppContent(viewModel: MainViewModel) {
                         onSelectOption = { viewModel.selectDuelOption(it) },
                         onRevealQuestion = { viewModel.revealDuelQuestion() },
                         onNextQuestion = { viewModel.nextDuelQuestion() },
-                        onBack = { viewModel.navigateTo(Screen.COMPETE) }
+                        onBack = { if (!navController.popBackStack()) viewModel.navigateTo(Screen.COMPETE) }
                     )
                 }
             }

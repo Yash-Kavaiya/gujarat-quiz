@@ -26,14 +26,21 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.DuelFriend
 import com.example.data.LeaderboardEntry
+import com.example.data.LeaderboardUser
 import com.example.data.SeedData
 import com.example.ui.components.CoinBalanceBadge
 import com.example.ui.theme.DisplayFontFamily
 import com.example.ui.theme.LocalAppColors
 
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.filled.Storage
+import androidx.compose.ui.platform.testTag
+
 @Composable
 fun CompeteScreen(
     userCoins: Int,
+    leaderboardUsers: List<LeaderboardUser> = emptyList(),
     onStartDailyChallenge: () -> Unit,
     onStartDuel: (DuelFriend) -> Unit,
     onOpenMockTest: () -> Unit
@@ -101,7 +108,10 @@ fun CompeteScreen(
         Spacer(modifier = Modifier.height(12.dp))
 
         when (selectedTab) {
-            0 -> LeaderboardTab(onStartDailyChallenge = onStartDailyChallenge)
+            0 -> LeaderboardTab(
+                leaderboardUsers = leaderboardUsers,
+                onStartDailyChallenge = onStartDailyChallenge
+            )
             1 -> DuelsTab(onStartDuel = onStartDuel)
             2 -> MockTestsTab(onOpenMockTest = onOpenMockTest)
         }
@@ -109,92 +119,232 @@ fun CompeteScreen(
 }
 
 @Composable
-fun LeaderboardTab(onStartDailyChallenge: () -> Unit) {
+fun LeaderboardTab(
+    leaderboardUsers: List<LeaderboardUser>,
+    onStartDailyChallenge: () -> Unit
+) {
     val colors = LocalAppColors.current
-    val entries = SeedData.sampleLeaderboard
+    val entries = if (leaderboardUsers.isNotEmpty()) leaderboardUsers else SeedData.sampleLeaderboard
+
+    var selectedFilter by remember { mutableStateOf("All Cities") }
+    val cities = listOf("All Cities", "Ahmedabad", "Surat", "Rajkot", "Vadodara", "Gandhinagar")
+
+    val filteredEntries = remember(entries, selectedFilter) {
+        if (selectedFilter == "All Cities") entries
+        else entries.filter { it.district.equals(selectedFilter, ignoreCase = true) || it.isCurrentUser }
+    }
+
+    val currentUser = entries.find { it.isCurrentUser }
 
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 20.dp),
+            .padding(horizontal = 20.dp)
+            .testTag("global_leaderboard_list"),
         verticalArrangement = Arrangement.spacedBy(12.dp),
         contentPadding = PaddingValues(bottom = 80.dp)
     ) {
+        // Room DB Sync Badge & Hero Banner
         item {
-            // Daily Challenge Banner
             Card(
                 shape = RoundedCornerShape(20.dp),
                 colors = CardDefaults.cardColors(containerColor = colors.ink),
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("leaderboard_banner_card")
             ) {
-                Row(
-                    modifier = Modifier.padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.FlashOn, contentDescription = null, tint = colors.primary, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(text = "DAILY ARENA", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = colors.primary)
-                        }
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(text = "Grand Prize: 5,000 Coins", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                        Text(text = "Entry: 50 coins · Top 10 win rewards", fontSize = 12.sp, color = Color.White.copy(alpha = 0.7f))
-                    }
-                    Button(
-                        onClick = onStartDailyChallenge,
-                        colors = ButtonDefaults.buttonColors(containerColor = colors.primary),
-                        shape = RoundedCornerShape(12.dp)
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(text = "Enter", fontWeight = FontWeight.Bold, color = Color.White)
+                        Surface(
+                            color = colors.primary.copy(alpha = 0.25f),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Storage,
+                                    contentDescription = null,
+                                    tint = colors.primary,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = "ROOM DATABASE SYNC",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = colors.primary
+                                )
+                            }
+                        }
+                        if (currentUser != null) {
+                            Text(
+                                text = "Your Rank: #${currentUser.rank}",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = colors.accentGold
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.FlashOn, contentDescription = null, tint = colors.primary, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(text = "DAILY ARENA", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = colors.primary)
+                            }
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(text = "Grand Prize: 5,000 Coins", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                            Text(text = "Earn points in quizzes to climb rankings!", fontSize = 12.sp, color = Color.White.copy(alpha = 0.7f))
+                        }
+                        Button(
+                            onClick = onStartDailyChallenge,
+                            colors = ButtonDefaults.buttonColors(containerColor = colors.primary),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Text(text = "Enter", fontWeight = FontWeight.Bold, color = Color.White)
+                        }
                     }
                 }
             }
         }
 
+        // Filter Chips
         item {
-            Text(
-                text = "State Rankings (This Week)",
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Bold,
-                color = colors.ink,
-                modifier = Modifier.padding(vertical = 8.dp)
-            )
+            Column {
+                Text(
+                    text = "Global & City Leaderboards",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = colors.ink,
+                    modifier = Modifier.padding(top = 4.dp, bottom = 8.dp)
+                )
+
+                LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    items(cities) { city ->
+                        FilterChip(
+                            selected = selectedFilter == city,
+                            onClick = { selectedFilter = city },
+                            label = { Text(city, fontSize = 12.sp) },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = colors.primary,
+                                selectedLabelColor = Color.White,
+                                containerColor = colors.card
+                            ),
+                            shape = RoundedCornerShape(12.dp)
+                        )
+                    }
+                }
+            }
         }
 
         // Podium Top 3
         item {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 8.dp),
-                horizontalArrangement = Arrangement.SpaceEvenly,
-                verticalAlignment = Alignment.Bottom
-            ) {
+            val top1 = filteredEntries.getOrNull(0)
+            val top2 = filteredEntries.getOrNull(1)
+            val top3 = filteredEntries.getOrNull(2)
 
-                // Rank 2
-                val rank2 = entries.find { it.rank == 2 }
-                if (rank2 != null) PodiumCard(entry = rank2, height = 110.dp, color = Color(0xFFC0C0C0))
-
-                // Rank 1
-                val rank1 = entries.find { it.rank == 1 }
-                if (rank1 != null) PodiumCard(entry = rank1, height = 140.dp, color = colors.primary)
-
-                // Rank 3
-                val rank3 = entries.find { it.rank == 3 }
-                if (rank3 != null) PodiumCard(entry = rank3, height = 90.dp, color = Color(0xFFCD7F32))
+            if (top1 != null) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    verticalAlignment = Alignment.Bottom
+                ) {
+                    if (top2 != null) PodiumCard(entry = top2, height = 110.dp, color = Color(0xFFC0C0C0))
+                    PodiumCard(entry = top1, height = 140.dp, color = colors.primary)
+                    if (top3 != null) PodiumCard(entry = top3, height = 90.dp, color = Color(0xFFCD7F32))
+                }
             }
         }
 
-        itemsIndexed(entries.filter { it.rank > 3 }) { _, item ->
+        // Current User Highlight Card if outside top 3
+        if (currentUser != null && currentUser.rank > 3) {
+            item {
+                Card(
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = colors.primaryLight),
+                    border = androidx.compose.foundation.BorderStroke(2.dp, colors.primary),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("user_current_rank_card")
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Surface(
+                                color = colors.primary,
+                                shape = CircleShape,
+                                modifier = Modifier.size(32.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Text(text = "#${currentUser.rank}", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                }
+                            }
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(text = currentUser.name, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = colors.ink)
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Surface(color = colors.primary, shape = RoundedCornerShape(4.dp)) {
+                                        Text("YOU", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color.White, modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp))
+                                    }
+                                }
+                                Text(text = "${currentUser.district} · Room DB Live", fontSize = 11.sp, color = colors.muted)
+                            }
+                        }
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text(
+                                text = "${currentUser.score} pts",
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = colors.primary
+                            )
+                            Text(
+                                text = currentUser.delta,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = Color(0xFF2E7D32)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // Remaining Rankings List
+        val remainingEntries = filteredEntries.drop(3)
+        itemsIndexed(remainingEntries) { _, item ->
             Card(
                 shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(
-                    containerColor = if (item.isUser) colors.primaryLight else colors.card
+                    containerColor = if (item.isCurrentUser) colors.primaryLight else colors.card
                 ),
-                border = if (item.isUser) androidx.compose.foundation.BorderStroke(1.5.dp, colors.primary) else null,
-                modifier = Modifier.fillMaxWidth()
+                border = if (item.isCurrentUser) androidx.compose.foundation.BorderStroke(1.5.dp, colors.primary) else null,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("leaderboard_item_${item.rank}")
             ) {
                 Row(
                     modifier = Modifier
@@ -218,7 +368,7 @@ fun LeaderboardTab(onStartDailyChallenge: () -> Unit) {
                                 .background(colors.primary.copy(alpha = 0.2f)),
                             contentAlignment = Alignment.Center
                         ) {
-                            Text(text = item.avatar, fontSize = 18.sp)
+                            Text(text = item.avatar, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = colors.primary)
                         }
                         Spacer(modifier = Modifier.width(12.dp))
                         Column {
@@ -226,12 +376,19 @@ fun LeaderboardTab(onStartDailyChallenge: () -> Unit) {
                             Text(text = item.district, fontSize = 12.sp, color = colors.muted)
                         }
                     }
-                    Text(
-                        text = "${item.score} pts",
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = colors.primary
-                    )
+                    Column(horizontalAlignment = Alignment.End) {
+                        Text(
+                            text = "${item.score} pts",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = colors.primary
+                        )
+                        Text(
+                            text = item.delta,
+                            fontSize = 11.sp,
+                            color = colors.muted
+                        )
+                    }
                 }
             }
         }

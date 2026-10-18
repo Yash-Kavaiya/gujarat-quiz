@@ -230,6 +230,7 @@ fun QuizPlayScreen(
 
             // Bottom Continue / Next Button
             if (quizState.isRevealed) {
+                val isLastQuestion = quizState.currentIndex == quizState.questions.size - 1
                 Button(
                     onClick = onNextQuestion,
                     colors = ButtonDefaults.buttonColors(containerColor = colors.primary),
@@ -238,7 +239,12 @@ fun QuizPlayScreen(
                         .fillMaxWidth()
                         .height(52.dp)
                 ) {
-                    Text(text = "Next Question →", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                    Text(
+                        text = if (isLastQuestion) "Finish →" else "Next Question →",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
                 }
             }
         }

@@ -10,9 +10,10 @@ import androidx.room.RoomDatabase
         UserProfileEntity::class,
         TransactionEntity::class,
         CategoryProgressEntity::class,
-        BookmarkedCapsuleEntity::class
+        BookmarkedCapsuleEntity::class,
+        LeaderboardEntity::class
     ],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -28,7 +29,9 @@ abstract class AppDatabase : RoomDatabase() {
                     context.applicationContext,
                     AppDatabase::class.java,
                     "gujarat_quiz_database"
-                ).build()
+                )
+                    .fallbackToDestructiveMigration()
+                    .build()
                 INSTANCE = instance
                 instance
             }

@@ -24,6 +24,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.QuizCategory
 import com.example.data.SeedData
+import com.example.ui.components.DynamicCoinBalanceCard
 import com.example.ui.components.GoldCoinIcon
 import com.example.ui.components.TopBar
 import com.example.ui.theme.*
@@ -146,6 +147,18 @@ fun HomeScreen(
                         }
                     }
                 }
+            }
+
+            // Dynamic Coin Balance Component
+            item {
+                DynamicCoinBalanceCard(
+                    coinBalance = coinBalance,
+                    accuracyPercentage = accuracy,
+                    streakDays = streakDays,
+                    totalQuizzes = quizzesCount,
+                    onEarnMoreClick = onStartDailyChallenge,
+                    onOpenShopClick = onCoinsClick
+                )
             }
 
             // Quick Stats Row

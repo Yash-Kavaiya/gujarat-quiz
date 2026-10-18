@@ -64,12 +64,20 @@ fun CoinBalanceBadge(
     onClick: (() -> Unit)? = null
 ) {
     val colors = LocalAppColors.current
+    val animatedCoins by animateIntAsState(
+        targetValue = coins,
+        animationSpec = tween(durationMillis = 800, easing = FastOutSlowInEasing),
+        label = "coin_badge_anim"
+    )
+
     Surface(
         shape = RoundedCornerShape(20.dp),
         color = colors.card,
         tonalElevation = 2.dp,
         shadowElevation = 1.dp,
-        modifier = modifier.then(if (onClick != null) Modifier.clickable { onClick() } else Modifier)
+        modifier = modifier
+            .testTag("coin_balance_badge")
+            .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier)
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
@@ -78,7 +86,7 @@ fun CoinBalanceBadge(
         ) {
             GoldCoinIcon(sizeDp = 20)
             Text(
-                text = String.format("%,d", coins),
+                text = String.format("%,d", animatedCoins),
                 fontSize = 14.sp,
                 fontWeight = FontWeight.Bold,
                 color = colors.ink,
@@ -187,28 +195,10 @@ fun TopBar(
             }
 
             // Coin Pill
-            Surface(
-                shape = RoundedCornerShape(20.dp),
-                color = colors.card,
-                tonalElevation = 2.dp,
-                shadowElevation = 1.dp,
-                modifier = Modifier.clickable { onCoinsClick() }
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    GoldCoinIcon(sizeDp = 20)
-                    Text(
-                        text = String.format("%,d", coinBalance),
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = colors.ink,
-                        fontFamily = NumericFontFamily
-                    )
-                }
-            }
+            CoinBalanceBadge(
+                coins = coinBalance,
+                onClick = onCoinsClick
+            )
         }
     }
 }

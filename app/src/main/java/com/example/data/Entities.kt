@@ -49,3 +49,14 @@ data class BookmarkedCapsuleEntity(
     @PrimaryKey val capsuleId: String,
     val isBookmarked: Boolean = true
 )
+
+@Entity(tableName = "leaderboard_users")
+data class LeaderboardEntity(
+    @PrimaryKey val id: String,
+    val name: String,
+    val initials: String,
+    val city: String,
+    val totalScore: Int,
+    val delta: String = "0",
+    val isCurrentUser: Boolean = false
+)

@@ -14,6 +14,12 @@ interface AppDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertOrUpdateProfile(profile: UserProfileEntity)
 
+    @Query("UPDATE user_profile SET coins = :coins WHERE id = 1")
+    suspend fun updateCoins(coins: Int)
+
+    @Query("UPDATE user_profile SET streakDays = :streak WHERE id = 1")
+    suspend fun updateStreak(streak: Int)
+
     @Query("SELECT * FROM transactions ORDER BY id DESC")
     fun getAllTransactions(): Flow<List<TransactionEntity>>
 
@@ -34,4 +40,19 @@ interface AppDao {
 
     @Query("DELETE FROM unlocked_capsules WHERE capsuleId = :capsuleId")
     suspend fun removeBookmark(capsuleId: String)
+
+    @Query("SELECT * FROM leaderboard_users ORDER BY totalScore DESC")
+    fun getLeaderboardUsers(): Flow<List<LeaderboardEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertLeaderboardUsers(users: List<LeaderboardEntity>)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertOrUpdateLeaderboardUser(user: LeaderboardEntity)
+
+    @Query("SELECT COUNT(*) FROM leaderboard_users")
+    suspend fun getLeaderboardCount(): Int
+
+    @Query("SELECT * FROM leaderboard_users WHERE isCurrentUser = 1 LIMIT 1")
+    suspend fun getCurrentUserLeaderboardEntity(): LeaderboardEntity?
 }
