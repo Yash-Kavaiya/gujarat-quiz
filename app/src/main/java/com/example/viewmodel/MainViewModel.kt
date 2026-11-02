@@ -4,9 +4,13 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.*
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlin.random.Random
 
 enum class Screen {
     ONBOARDING,
@@ -29,33 +33,66 @@ enum class DuelPhase {
     LIVE_MATCH
 }
 
+/** Which flow produced the current [QuizState]; drives the results screen and "retry". */
+enum class QuizMode {
+    PRACTICE,
+    DAILY_CHALLENGE,
+    MOCK_TEST,
+    DUEL
+}
+
+const val QUIZ_SECONDS_PER_QUESTION = 30
+const val DUEL_SECONDS_PER_QUESTION = 20
+const val MOCK_TEST_SECONDS = 7200
+const val HINT_COIN_COST = 50
+const val COINS_PER_CORRECT = 30
+const val HIGH_SCORE_BONUS = 200
+const val DAILY_CHALLENGE_ENTRY = 50
+const val DAILY_CHALLENGE_TOP_BONUS = 500
+const val MOCK_TEST_ENTRY = 100
+const val MOCK_TEST_HIGH_SCORE_REWARD = 1000
+const val DUEL_ENTRY = 100
+const val DUEL_PRIZE = 200
+
 data class QuizState(
+    val mode: QuizMode = QuizMode.PRACTICE,
     val category: QuizCategory? = null,
     val questions: List<Question> = emptyList(),
     val currentIndex: Int = 0,
-    val userAnswers: MutableMap<Int, Int> = mutableMapOf(),
+    val userAnswers: Map<Int, Int> = emptyMap(),
     val isRevealed: Boolean = false,
     val selectedOption: Int? = null,
-    val timerSeconds: Int = 30,
+    val timerSeconds: Int = QUIZ_SECONDS_PER_QUESTION,
+    val timerTotalSeconds: Int = QUIZ_SECONDS_PER_QUESTION,
     val isTimerActive: Boolean = false,
+    val timedOut: Boolean = false,
     val eliminatedOptions: Set<Int> = emptySet(),
+    /** Coins earned from correct answers during the quiz (before bonuses). */
     val coinsEarnedInQuiz: Int = 0,
+    /** Total coins credited to the wallet when the session finished (incl. bonuses / prizes). */
+    val coinsAwarded: Int = 0,
     val showCoinPopAnimation: Boolean = false,
     val quizCompleted: Boolean = false,
     val isWinState: Boolean = false,
+    val isTie: Boolean = false,
     val scorePercentage: Int = 0,
     val correctCount: Int = 0,
-    val totalCount: Int = 0
+    val wrongCount: Int = 0,
+    val unattemptedCount: Int = 0,
+    val totalCount: Int = 0,
+    /** e.g. "142.6 / 200" for mock tests or "50 – 30" for duels. */
+    val scoreLabel: String? = null,
+    val pointsGained: Int = 0
 )
 
 data class MockTestState(
     val questions: List<MockQuestion> = emptyList(),
     val currentIndex: Int = 0,
     val activeSection: String = "General Studies",
-    val userAnswers: MutableMap<Int, Int> = mutableMapOf(),
-    val markedForReview: MutableSet<Int> = mutableSetOf(),
-    val visitedQuestions: MutableSet<Int> = mutableSetOf(),
-    val timeRemainingSeconds: Int = 7200, // 2 hours
+    val userAnswers: Map<Int, Int> = emptyMap(),
+    val markedForReview: Set<Int> = emptySet(),
+    val visitedQuestions: Set<Int> = emptySet(),
+    val timeRemainingSeconds: Int = MOCK_TEST_SECONDS,
     val isPaletteOpen: Boolean = false,
     val isSubmitModalOpen: Boolean = false,
     val isSubmitted: Boolean = false,
@@ -72,9 +109,10 @@ data class DuelState(
     val questions: List<Question> = emptyList(),
     val userScore: Int = 0,
     val opponentScore: Int = 0,
+    /** Selected option, or -1 if the round timed out without an answer. */
     val userChoice: Int? = null,
     val opponentChoice: Int? = null,
-    val timerSeconds: Int = 20,
+    val timerSeconds: Int = DUEL_SECONDS_PER_QUESTION,
     val isRevealed: Boolean = false,
     val winnerName: String? = null
 )
@@ -84,44 +122,79 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val repository: AppRepository
     private val preferencesRepository: UserPreferencesRepository
 
+    private val _userProfile = MutableStateFlow(UserProfileEntity())
+    val userProfile: StateFlow<UserProfileEntity> = _userProfile.asStateFlow()
+
+    private val _profileLoaded = MutableStateFlow(false)
+    val profileLoaded: StateFlow<Boolean> = _profileLoaded.asStateFlow()
+
+    private val _activeTheme = MutableStateFlow("Saffron")
+    val activeTheme: StateFlow<String> = _activeTheme.asStateFlow()
+
+    private val _currentScreen = MutableStateFlow(Screen.HOME)
+    val currentScreen: StateFlow<Screen> = _currentScreen.asStateFlow()
+
+    private val _currentBottomTab = MutableStateFlow(0) // 0: Home, 1: Categories, 2: Compete, 3: Profile
+    val currentBottomTab: StateFlow<Int> = _currentBottomTab.asStateFlow()
+
+    private val _onboardingStep = MutableStateFlow(1)
+    val onboardingStep: StateFlow<Int> = _onboardingStep.asStateFlow()
+
+    private val _showReferralSheet = MutableStateFlow(false)
+    val showReferralSheet: StateFlow<Boolean> = _showReferralSheet.asStateFlow()
+
+    private val _toastMessage = MutableStateFlow<String?>(null)
+    val toastMessage: StateFlow<String?> = _toastMessage.asStateFlow()
+
+    private val _quizState = MutableStateFlow(QuizState())
+    val quizState: StateFlow<QuizState> = _quizState.asStateFlow()
+
+    private val _mockTestState = MutableStateFlow(MockTestState())
+    val mockTestState: StateFlow<MockTestState> = _mockTestState.asStateFlow()
+
+    private val _duelState = MutableStateFlow(DuelState())
+    val duelState: StateFlow<DuelState> = _duelState.asStateFlow()
+
+    private var quizTimerJob: Job? = null
+    private var mockTimerJob: Job? = null
+    private var duelTimerJob: Job? = null
+    private var duelOpponentJob: Job? = null
+    private var coinPopJob: Job? = null
+
+    private val profileWriteMutex = Mutex()
+    private var pendingProfileWrites = 0
+
     init {
         val dao = AppDatabase.getDatabase(application).appDao()
         repository = AppRepository(dao)
         preferencesRepository = UserPreferencesRepository(application)
 
         viewModelScope.launch {
-            repository.userProfile.collect { profile ->
-                if (profile != null) {
-                    _userProfile.value = profile
-                    _activeTheme.value = profile.theme
-                    if (!profile.onboardingCompleted) {
-                        _currentScreen.value = Screen.ONBOARDING
-                    }
-                    preferencesRepository.saveCoinsAndStreak(profile.coins, profile.streakDays)
-                } else {
-                    // Seed initial user profile
-                    val initialProfile = UserProfileEntity()
-                    repository.saveUserProfile(initialProfile)
-                    preferencesRepository.saveCoinsAndStreak(initialProfile.coins, initialProfile.streakDays)
-                    // Seed initial transactions
-                    repository.addTransaction(TransactionEntity(title = "Signup bonus", timeAgo = "2d ago", amount = 500))
-                    repository.addTransaction(TransactionEntity(title = "Daily login streak · D7", timeAgo = "1d ago", amount = 100))
-                    repository.addTransaction(TransactionEntity(title = "Practice · Polity", timeAgo = "1d ago", amount = -40))
-                    repository.addTransaction(TransactionEntity(title = "Quiz reward (88%)", timeAgo = "1d ago", amount = 80))
-                    repository.addTransaction(TransactionEntity(title = "Referral · Darshan", timeAgo = "3h ago", amount = 500))
-                    repository.addTransaction(TransactionEntity(title = "GPSC Mock Test", timeAgo = "2h ago", amount = -100))
-                    repository.addTransaction(TransactionEntity(title = "Daily Challenge · Top 3", timeAgo = "14m ago", amount = 5000))
-                }
-            }
+            repository.seedLeaderboardIfEmpty()
         }
 
         viewModelScope.launch {
-            repository.seedLeaderboardIfEmpty()
+            repository.userProfile.collect { profile ->
+                if (profile != null) {
+                    // Ignore echoes of our own in-flight writes; the in-memory value is newer.
+                    if (pendingProfileWrites == 0) _userProfile.value = profile
+                    _activeTheme.value = _userProfile.value.theme
+                    if (!_profileLoaded.value) {
+                        if (!profile.onboardingCompleted) {
+                            _currentScreen.value = Screen.ONBOARDING
+                        }
+                        _profileLoaded.value = true
+                    }
+                    preferencesRepository.saveCoinsAndStreak(profile.coins, profile.streakDays)
+                } else {
+                    // First launch: seed a fresh profile and the signup bonus.
+                    val initialProfile = UserProfileEntity(referralCode = generateReferralCode("AS"))
+                    repository.saveUserProfile(initialProfile)
+                    repository.addTransaction(TransactionEntity(title = "Signup bonus", timeAgo = "", amount = initialProfile.coins))
+                }
+            }
         }
     }
-
-    private val _userProfile = MutableStateFlow(UserProfileEntity())
-    val userProfile: StateFlow<UserProfileEntity> = _userProfile.asStateFlow()
 
     val transactions: StateFlow<List<TransactionEntity>> = repository.transactions
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -142,50 +215,67 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    private val _activeTheme = MutableStateFlow("Saffron")
-    val activeTheme: StateFlow<String> = _activeTheme.asStateFlow()
+    /** The user's live rank on the leaderboard (0 while loading). */
+    val userRank: StateFlow<Int> = leaderboardUsers
+        .map { list -> list.firstOrNull { it.isCurrentUser }?.rank ?: 0 }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
 
-    private val _currentScreen = MutableStateFlow(Screen.HOME)
-    val currentScreen: StateFlow<Screen> = _currentScreen.asStateFlow()
+    val activityDays: StateFlow<List<ActivityDayEntity>> = repository.activityDays
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    private val _currentBottomTab = MutableStateFlow(0) // 0: Home, 1: Categories, 2: Compete, 3: Profile
-    val currentBottomTab: StateFlow<Int> = _currentBottomTab.asStateFlow()
+    val categoryProgress: StateFlow<Map<String, CategoryProgressEntity>> = repository.categoryProgressList
+        .map { list -> list.associateBy { it.categoryId } }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
 
-    private val _onboardingStep = MutableStateFlow(1)
-    val onboardingStep: StateFlow<Int> = _onboardingStep.asStateFlow()
+    val bookmarkedCapsuleIds: StateFlow<Set<String>> = repository.bookmarkedCapsules
+        .map { list -> list.filter { it.isBookmarked }.map { it.capsuleId }.toSet() }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptySet())
 
-    private val _showReferralSheet = MutableStateFlow(false)
-    val showReferralSheet: StateFlow<Boolean> = _showReferralSheet.asStateFlow()
+    /** Streak to display, accounting for days missed since the last activity. */
+    val displayStreak: StateFlow<Int> = _userProfile
+        .map { p -> StreakCalculator.effectiveStreak(today(), p.lastActiveEpochDay, p.streakDays, p.freezesOwned) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
 
-    private val _toastMessage = MutableStateFlow<String?>(null)
-    val toastMessage: StateFlow<String?> = _toastMessage.asStateFlow()
+    private fun today(): Long = DayClock.epochDay()
 
-    // Quiz State
-    private val _quizState = MutableStateFlow(QuizState())
-    val quizState: StateFlow<QuizState> = _quizState.asStateFlow()
+    /**
+     * Applies [transform] to the in-memory profile and persists it. Writes are serialised and
+     * always store the latest in-memory value, so rapid successive updates can't be lost.
+     */
+    private fun updateProfile(transform: (UserProfileEntity) -> UserProfileEntity): UserProfileEntity {
+        val updated = transform(_userProfile.value)
+        _userProfile.value = updated
+        pendingProfileWrites++
+        viewModelScope.launch {
+            try {
+                profileWriteMutex.withLock { repository.saveUserProfile(_userProfile.value) }
+            } finally {
+                pendingProfileWrites--
+            }
+        }
+        return updated
+    }
 
-    // Mock Test State
-    private val _mockTestState = MutableStateFlow(MockTestState())
-    val mockTestState: StateFlow<MockTestState> = _mockTestState.asStateFlow()
-
-    // Duel State
-    private val _duelState = MutableStateFlow(DuelState())
-    val duelState: StateFlow<DuelState> = _duelState.asStateFlow()
+    // ---------------------------------------------------------------- Navigation
 
     fun navigateTo(screen: Screen) {
         _currentScreen.value = screen
-        if (screen == Screen.HOME) _currentBottomTab.value = 0
-        if (screen == Screen.CATEGORIES) _currentBottomTab.value = 1
-        if (screen == Screen.COMPETE) _currentBottomTab.value = 2
-        if (screen == Screen.PROFILE) _currentBottomTab.value = 3
+        syncBottomTab(screen)
     }
 
     fun setCurrentScreenFromNav(screen: Screen) {
         _currentScreen.value = screen
-        if (screen == Screen.HOME) _currentBottomTab.value = 0
-        if (screen == Screen.CATEGORIES) _currentBottomTab.value = 1
-        if (screen == Screen.COMPETE) _currentBottomTab.value = 2
-        if (screen == Screen.PROFILE) _currentBottomTab.value = 3
+        syncBottomTab(screen)
+    }
+
+    private fun syncBottomTab(screen: Screen) {
+        when (screen) {
+            Screen.HOME -> _currentBottomTab.value = 0
+            Screen.CATEGORIES -> _currentBottomTab.value = 1
+            Screen.COMPETE -> _currentBottomTab.value = 2
+            Screen.PROFILE -> _currentBottomTab.value = 3
+            else -> Unit
+        }
     }
 
     fun selectBottomTab(tabIndex: Int) {
@@ -210,7 +300,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _toastMessage.value = msg
     }
 
-    // Onboarding Actions
+    // ---------------------------------------------------------------- Onboarding & profile
+
     fun nextOnboardingStep() {
         if (_onboardingStep.value < 3) {
             _onboardingStep.value += 1
@@ -218,116 +309,164 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun setGoal(goal: String) {
-        val updated = _userProfile.value.copy(goal = goal)
-        _userProfile.value = updated
-        viewModelScope.launch { repository.saveUserProfile(updated) }
+        updateProfile { it.copy(goal = goal) }
+    }
+
+    fun updateNameAndCity(name: String, city: String) {
+        val cleanName = name.trim().ifEmpty { return }
+        val cleanCity = city.trim().ifEmpty { _userProfile.value.city }
+        val initials = initialsFor(cleanName)
+        val updated = updateProfile {
+            it.copy(
+                name = cleanName,
+                city = cleanCity,
+                initials = initials,
+                referralCode = if (it.referralCode.startsWith(it.initials)) generateReferralCode(initials) else it.referralCode
+            )
+        }
+        viewModelScope.launch {
+            repository.syncLeaderboardIdentity(updated.name, updated.city, updated.initials)
+        }
     }
 
     fun claimWelcomeGift() {
         addCoins(500, "Welcome gift")
-        val updated = _userProfile.value.copy(onboardingCompleted = true)
-        _userProfile.value = updated
-        viewModelScope.launch { repository.saveUserProfile(updated) }
-        _currentScreen.value = Screen.HOME
+        updateProfile { it.copy(onboardingCompleted = true) }
+        _onboardingStep.value = 1
+        navigateTo(Screen.HOME)
     }
 
-    // Theme Switcher
     fun switchTheme(themeName: String) {
         _activeTheme.value = themeName
-        val updated = _userProfile.value.copy(theme = themeName)
-        _userProfile.value = updated
-        viewModelScope.launch { repository.saveUserProfile(updated) }
+        updateProfile { it.copy(theme = themeName) }
         showToast("Theme switched to $themeName")
     }
 
-    // Coin Economy
+    // ---------------------------------------------------------------- Coin economy
+
     fun deductCoins(amount: Int, reason: String): Boolean {
-        if (_userProfile.value.coins >= amount) {
-            val newBalance = _userProfile.value.coins - amount
-            val updated = _userProfile.value.copy(coins = newBalance)
-            _userProfile.value = updated
-            viewModelScope.launch {
-                repository.saveUserProfile(updated)
-                repository.addTransaction(TransactionEntity(title = reason, timeAgo = "Just now", amount = -amount))
-            }
-            return true
-        } else {
+        if (_userProfile.value.coins < amount) {
             showToast("Not enough coins! You need $amount coins.")
             return false
         }
+        updateProfile { it.copy(coins = it.coins - amount) }
+        viewModelScope.launch {
+            repository.addTransaction(TransactionEntity(title = reason, timeAgo = "", amount = -amount))
+        }
+        return true
     }
 
     fun addCoins(amount: Int, reason: String) {
-        val newBalance = _userProfile.value.coins + amount
-        val updated = _userProfile.value.copy(coins = newBalance)
-        _userProfile.value = updated
+        if (amount <= 0) return
+        updateProfile { it.copy(coins = it.coins + amount) }
         viewModelScope.launch {
-            repository.saveUserProfile(updated)
-            repository.addTransaction(TransactionEntity(title = reason, timeAgo = "Just now", amount = amount))
+            repository.addTransaction(TransactionEntity(title = reason, timeAgo = "", amount = amount))
         }
     }
 
-    // Practice Quiz Flow
+    // ---------------------------------------------------------------- Practice quiz & daily challenge
+
     fun startPracticeQuiz(category: QuizCategory) {
-        if (!deductCoins(category.coinCost, "Practice · ${category.titleEn}")) {
+        val questions = QuestionBank.quizFor(category.id)
+        if (questions.isEmpty()) {
+            showToast("No questions available yet for ${category.titleEn}")
             return
         }
-        val questions = SeedData.sampleQuestions.filter { it.categoryId == category.id }
-            .ifEmpty { SeedData.sampleQuestions }
+        if (!deductCoins(category.coinCost, "Practice · ${category.titleEn}")) return
+        beginQuiz(QuizMode.PRACTICE, category, questions)
+    }
+
+    /** Starts a practice quiz for a capsule's related category. */
+    fun startPracticeForCategoryId(categoryId: String) {
+        val category = SeedData.categories.find { it.id == categoryId } ?: return
+        startPracticeQuiz(category)
+    }
+
+    fun isDailyChallengePlayedToday(): Boolean = _userProfile.value.lastDailyChallengeEpochDay == today()
+
+    fun startDailyChallenge() {
+        if (isDailyChallengePlayedToday()) {
+            showToast("You've already played today's challenge. Come back tomorrow!")
+            return
+        }
+        if (!deductCoins(DAILY_CHALLENGE_ENTRY, "Daily Challenge entry")) return
+        updateProfile { it.copy(lastDailyChallengeEpochDay = today()) }
+        val category = QuizCategory(
+            id = "daily_challenge",
+            titleEn = "Daily Challenge",
+            titleGuj = "દૈનિક ચેલેન્જ",
+            questionCount = 10,
+            difficulty = "Mixed",
+            coinCost = DAILY_CHALLENGE_ENTRY,
+            initials = "DC"
+        )
+        beginQuiz(QuizMode.DAILY_CHALLENGE, category, QuestionBank.dailyChallenge(today()))
+    }
+
+    private fun beginQuiz(mode: QuizMode, category: QuizCategory, questions: List<Question>) {
         _quizState.value = QuizState(
+            mode = mode,
             category = category,
             questions = questions,
             currentIndex = 0,
-            timerSeconds = 30,
+            timerSeconds = QUIZ_SECONDS_PER_QUESTION,
             isTimerActive = true
         )
-        _currentScreen.value = Screen.QUIZ_PLAY
+        startQuizTimer()
+        navigateTo(Screen.QUIZ_PLAY)
     }
 
-    fun startDailyChallenge() {
-        if (!deductCoins(50, "Daily Challenge entry")) {
-            return
+    private fun startQuizTimer() {
+        quizTimerJob?.cancel()
+        quizTimerJob = viewModelScope.launch {
+            while (true) {
+                delay(1000)
+                val s = _quizState.value
+                if (!s.isTimerActive || s.isRevealed || s.quizCompleted) break
+                val remaining = s.timerSeconds - 1
+                if (remaining <= 0) {
+                    onQuizTimeUp()
+                    break
+                }
+                _quizState.value = s.copy(timerSeconds = remaining)
+            }
         }
-        val category = SeedData.categories.find { it.id == "polity_constitution" } ?: SeedData.categories.first()
-        _quizState.value = QuizState(
-            category = category,
-            questions = SeedData.sampleQuestions,
-            currentIndex = 0,
-            timerSeconds = 30,
-            isTimerActive = true
+    }
+
+    private fun onQuizTimeUp() {
+        val s = _quizState.value
+        if (s.isRevealed) return
+        _quizState.value = s.copy(
+            timerSeconds = 0,
+            isRevealed = true,
+            isTimerActive = false,
+            selectedOption = null,
+            timedOut = true
         )
-        _currentScreen.value = Screen.QUIZ_PLAY
     }
 
     fun selectQuizOption(optionIndex: Int) {
         val current = _quizState.value
-        if (current.isRevealed) return
+        if (current.isRevealed || current.questions.isEmpty()) return
+        quizTimerJob?.cancel()
 
         val q = current.questions[current.currentIndex]
         val isCorrect = optionIndex == q.correctIndex
-        val answersMap = current.userAnswers.toMutableMap()
-        answersMap[current.currentIndex] = optionIndex
-
-        var coinsEarned = current.coinsEarnedInQuiz
-        var showCoinPop = false
-
-        if (isCorrect) {
-            coinsEarned += 30
-            showCoinPop = true
-        }
 
         _quizState.value = current.copy(
-            userAnswers = answersMap,
+            userAnswers = current.userAnswers + (current.currentIndex to optionIndex),
             isRevealed = true,
             selectedOption = optionIndex,
             isTimerActive = false,
-            coinsEarnedInQuiz = coinsEarned,
-            showCoinPopAnimation = showCoinPop
+            timedOut = false,
+            coinsEarnedInQuiz = current.coinsEarnedInQuiz + if (isCorrect) COINS_PER_CORRECT else 0,
+            showCoinPopAnimation = isCorrect
         )
 
-        if (showCoinPop) {
-            viewModelScope.launch {
-                delay(1500)
+        if (isCorrect) {
+            coinPopJob?.cancel()
+            coinPopJob = viewModelScope.launch {
+                delay(1200)
                 _quizState.value = _quizState.value.copy(showCoinPopAnimation = false)
             }
         }
@@ -335,17 +474,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun useQuizHint() {
         val current = _quizState.value
-        if (current.isRevealed) return
+        if (current.isRevealed || current.questions.isEmpty()) return
+        if (current.eliminatedOptions.isNotEmpty()) {
+            showToast("Hint already used on this question")
+            return
+        }
 
-        if (!deductCoins(50, "Quiz Hint")) {
+        if (_userProfile.value.hintsOwned > 0) {
+            updateProfile { it.copy(hintsOwned = it.hintsOwned - 1) }
+        } else if (!deductCoins(HINT_COIN_COST, "Quiz Hint")) {
             return
         }
 
         val q = current.questions[current.currentIndex]
-        val wrongIndices = (0..3).filter { it != q.correctIndex }
+        val wrongIndices = q.options.indices.filter { it != q.correctIndex }
         val elim = wrongIndices.shuffled().take(2).toSet()
 
-        _quizState.value = current.copy(eliminatedOptions = elim)
+        _quizState.value = _quizState.value.copy(eliminatedOptions = elim)
         showToast("Eliminated 2 wrong options!")
     }
 
@@ -357,103 +502,175 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 isRevealed = false,
                 selectedOption = null,
                 eliminatedOptions = emptySet(),
-                timerSeconds = 30,
-                isTimerActive = true
+                timerSeconds = QUIZ_SECONDS_PER_QUESTION,
+                isTimerActive = true,
+                timedOut = false,
+                showCoinPopAnimation = false
             )
+            startQuizTimer()
         } else {
-            // Quiz finished
             finishQuiz()
         }
     }
 
+    /** Called when the user leaves a quiz before finishing it. Entry fee is not refunded. */
+    fun abandonQuiz() {
+        quizTimerJob?.cancel()
+        coinPopJob?.cancel()
+        _quizState.value = _quizState.value.copy(isTimerActive = false, showCoinPopAnimation = false)
+    }
+
     private fun finishQuiz() {
+        quizTimerJob?.cancel()
         val current = _quizState.value
-        var correct = 0
-        current.questions.forEachIndexed { index, question ->
-            if (current.userAnswers[index] == question.correctIndex) {
-                correct++
+        if (current.quizCompleted) return
+
+        val total = current.questions.size
+        val correct = current.questions.indices.count { current.userAnswers[it] == current.questions[it].correctIndex }
+        val answered = current.userAnswers.size
+        val scorePercent = if (total > 0) (correct * 100) / total else 0
+        val isWin = scorePercent >= 80
+
+        var awarded = current.coinsEarnedInQuiz
+        if (isWin) awarded += HIGH_SCORE_BONUS
+        if (current.mode == QuizMode.DAILY_CHALLENGE && correct == total && total > 0) awarded += DAILY_CHALLENGE_TOP_BONUS
+        val rewardLabel = if (current.mode == QuizMode.DAILY_CHALLENGE) "Daily Challenge reward" else "Quiz reward"
+        addCoins(awarded, "$rewardLabel (${scorePercent}%)")
+
+        val pointsGained = correct * 25
+        recordCompletedActivity(scorePercent)
+        current.category?.let { cat ->
+            if (current.mode == QuizMode.PRACTICE) {
+                viewModelScope.launch { repository.recordCategoryResult(cat.id, scorePercent) }
             }
         }
-        val total = current.questions.size
-        val scorePercent = if (total > 0) (correct * 100) / total else 0
-        var totalCoinsEarned = current.coinsEarnedInQuiz
-
-        val isWin = scorePercent >= 80
-        if (isWin) {
-            totalCoinsEarned += 200 // Bonus for high score
-            addCoins(totalCoinsEarned, "Quiz Reward (${scorePercent}%)")
-        } else if (totalCoinsEarned > 0) {
-            addCoins(totalCoinsEarned, "Quiz Reward (${scorePercent}%)")
-        }
-
-        // Update total quizzes and accuracy
-        val oldQuizzes = _userProfile.value.totalQuizzes
-        val oldAcc = _userProfile.value.accuracyPercentage
-        val newQuizzes = oldQuizzes + 1
-        val newAcc = ((oldAcc * oldQuizzes) + scorePercent) / newQuizzes
-
-        val updated = _userProfile.value.copy(
-            totalQuizzes = newQuizzes,
-            accuracyPercentage = newAcc
-        )
-        _userProfile.value = updated
-        val pointsGained = correct * 25
-        viewModelScope.launch {
-            repository.saveUserProfile(updated)
-            repository.updateUserQuizScore(pointsGained, updated.name, updated.city, updated.initials)
-        }
+        awardLeaderboardPoints(pointsGained)
 
         _quizState.value = current.copy(
+            isTimerActive = false,
+            showCoinPopAnimation = false,
             quizCompleted = true,
             isWinState = isWin,
             scorePercentage = scorePercent,
             correctCount = correct,
-            totalCount = total
+            wrongCount = answered - correct,
+            unattemptedCount = total - answered,
+            totalCount = total,
+            coinsAwarded = awarded,
+            pointsGained = pointsGained
         )
-        _currentScreen.value = Screen.RESULTS
+        navigateTo(Screen.RESULTS)
     }
 
-    // Mock Test Flow
-    fun startMockTest() {
-        if (!deductCoins(100, "GPSC Mock Test Paper I")) {
-            return
+    /** Updates quiz count, accuracy and the daily streak after any completed session. */
+    private fun recordCompletedActivity(scorePercent: Int) {
+        val todayDay = today()
+        val before = _userProfile.value
+        val streak = StreakCalculator.onActivity(todayDay, before.lastActiveEpochDay, before.streakDays, before.freezesOwned)
+        val newQuizzes = before.totalQuizzes + 1
+        val newAcc = ((before.accuracyPercentage * before.totalQuizzes) + scorePercent) / newQuizzes
+
+        updateProfile {
+            it.copy(
+                totalQuizzes = newQuizzes,
+                accuracyPercentage = newAcc,
+                streakDays = streak.streak,
+                longestStreak = maxOf(it.longestStreak, streak.streak),
+                freezesOwned = streak.freezesRemaining,
+                lastActiveEpochDay = todayDay
+            )
         }
-        val mockQs = SeedData.generateMock100Questions()
+        viewModelScope.launch { repository.recordActivity(todayDay, streak.frozenDays) }
+
+        when {
+            streak.frozenDays.isNotEmpty() ->
+                showToast("Streak saved with ${streak.frozenDays.size} freeze(s)! 🔥 ${streak.streak} days")
+            streak.streakWasReset ->
+                showToast("Streak restarted. Play daily to build it back up!")
+            streak.isFirstActivityToday ->
+                showToast("🔥 ${streak.streak}-day streak!")
+        }
+    }
+
+    private fun awardLeaderboardPoints(points: Int) {
+        if (points <= 0) return
+        val profile = _userProfile.value
+        viewModelScope.launch {
+            repository.updateUserQuizScore(points, profile.name, profile.city, profile.initials)
+        }
+    }
+
+    // ---------------------------------------------------------------- Mock test
+
+    fun startMockTest() {
+        if (!deductCoins(MOCK_TEST_ENTRY, "GPSC Mock Test Paper I")) return
+        val mockQs = QuestionBank.mockPaper()
         _mockTestState.value = MockTestState(
             questions = mockQs,
             currentIndex = 0,
-            activeSection = "General Studies",
-            visitedQuestions = mutableSetOf(0),
-            timeRemainingSeconds = 7200
+            activeSection = mockQs.firstOrNull()?.section ?: "General Studies",
+            visitedQuestions = setOf(0),
+            timeRemainingSeconds = MOCK_TEST_SECONDS
         )
-        _currentScreen.value = Screen.MOCK_TEST
+        startMockTimer()
+        navigateTo(Screen.MOCK_TEST)
+    }
+
+    private fun startMockTimer() {
+        mockTimerJob?.cancel()
+        mockTimerJob = viewModelScope.launch {
+            while (true) {
+                delay(1000)
+                val s = _mockTestState.value
+                if (s.isSubmitted || s.questions.isEmpty()) break
+                val remaining = s.timeRemainingSeconds - 1
+                if (remaining <= 0) {
+                    _mockTestState.value = s.copy(timeRemainingSeconds = 0)
+                    showToast("Time's up! Your test was submitted automatically.")
+                    submitMockTest()
+                    break
+                }
+                _mockTestState.value = s.copy(timeRemainingSeconds = remaining)
+            }
+        }
     }
 
     fun selectMockOption(qIndex: Int, optionIndex: Int) {
         val current = _mockTestState.value
-        val answers = current.userAnswers.toMutableMap()
-        answers[qIndex] = optionIndex
+        if (current.isSubmitted) return
+        val answers = if (current.userAnswers[qIndex] == optionIndex) {
+            current.userAnswers - qIndex // tap again to clear the response
+        } else {
+            current.userAnswers + (qIndex to optionIndex)
+        }
         _mockTestState.value = current.copy(userAnswers = answers)
+    }
+
+    fun clearMockResponse(qIndex: Int) {
+        val current = _mockTestState.value
+        _mockTestState.value = current.copy(userAnswers = current.userAnswers - qIndex)
     }
 
     fun toggleMockMarkForReview(qIndex: Int) {
         val current = _mockTestState.value
-        val set = current.markedForReview.toMutableSet()
-        if (set.contains(qIndex)) set.remove(qIndex) else set.add(qIndex)
+        val set = if (qIndex in current.markedForReview) current.markedForReview - qIndex else current.markedForReview + qIndex
         _mockTestState.value = current.copy(markedForReview = set)
     }
 
     fun goToMockQuestion(qIndex: Int) {
         val current = _mockTestState.value
-        val visited = current.visitedQuestions.toMutableSet()
-        visited.add(qIndex)
-        val section = current.questions[qIndex].section
+        val question = current.questions.getOrNull(qIndex) ?: return
         _mockTestState.value = current.copy(
             currentIndex = qIndex,
-            activeSection = section,
-            visitedQuestions = visited,
+            activeSection = question.section,
+            visitedQuestions = current.visitedQuestions + qIndex,
             isPaletteOpen = false
         )
+    }
+
+    fun goToMockSection(section: String) {
+        val index = _mockTestState.value.questions.indexOfFirst { it.section == section }
+        if (index >= 0) goToMockQuestion(index)
     }
 
     fun setMockPaletteOpen(open: Boolean) {
@@ -464,112 +681,167 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _mockTestState.value = _mockTestState.value.copy(isSubmitModalOpen = open)
     }
 
-    fun submitMockTest() {
-        val current = _mockTestState.value
-        var correct = 0
-        var wrong = 0
-        var score = 0f
+    /** Leaves the mock test without submitting. Entry fee is not refunded. */
+    fun quitMockTest() {
+        mockTimerJob?.cancel()
+        _mockTestState.value = MockTestState()
+    }
 
-        current.questions.forEachIndexed { index, q ->
-            val ans = current.userAnswers[index]
-            if (ans != null) {
-                if (ans == q.correctIndex) {
-                    correct++
-                    score += q.positiveMarks
-                } else {
-                    wrong++
-                    score -= q.negativeMarks
-                }
-            }
-        }
-        val unattempted = current.questions.size - (correct + wrong)
+    fun submitMockTest() {
+        mockTimerJob?.cancel()
+        val current = _mockTestState.value
+        if (current.isSubmitted || current.questions.isEmpty()) return
+
+        val result = MockScoring.score(current.questions, current.userAnswers)
 
         _mockTestState.value = current.copy(
             isSubmitModalOpen = false,
+            isPaletteOpen = false,
             isSubmitted = true,
-            totalScore = score,
-            correctCount = correct,
-            wrongCount = wrong,
-            unattemptedCount = unattempted
+            totalScore = result.score,
+            correctCount = result.correct,
+            wrongCount = result.wrong,
+            unattemptedCount = result.unattempted
         )
 
-        // Grant reward if score positive
-        if (score > 50) {
-            addCoins(1000, "Mock Test High Score")
-        }
+        val percent = if (result.maxScore > 0) (result.score / result.maxScore * 100).toInt().coerceIn(0, 100) else 0
+        val isHighScore = percent >= 60
+        if (isHighScore) addCoins(MOCK_TEST_HIGH_SCORE_REWARD, "Mock Test High Score")
 
-        val mockPoints = (score * 5).toInt().coerceAtLeast(0)
-        if (mockPoints > 0) {
-            viewModelScope.launch {
-                val profile = _userProfile.value
-                repository.updateUserQuizScore(mockPoints, profile.name, profile.city, profile.initials)
-            }
-        }
+        val mockPoints = (result.score * 5).toInt().coerceAtLeast(0)
+        recordCompletedActivity(percent)
+        awardLeaderboardPoints(mockPoints)
 
         _quizState.value = QuizState(
+            mode = QuizMode.MOCK_TEST,
             quizCompleted = true,
-            isWinState = score > 100,
-            scorePercentage = (score / 200 * 100).toInt().coerceIn(0, 100),
-            correctCount = correct,
-            totalCount = current.questions.size
+            isWinState = isHighScore,
+            scorePercentage = percent,
+            correctCount = result.correct,
+            wrongCount = result.wrong,
+            unattemptedCount = result.unattempted,
+            totalCount = current.questions.size,
+            coinsAwarded = if (isHighScore) MOCK_TEST_HIGH_SCORE_REWARD else 0,
+            scoreLabel = "%.2f / %.0f".format(result.score, result.maxScore),
+            pointsGained = mockPoints
         )
-        _currentScreen.value = Screen.RESULTS
+        navigateTo(Screen.RESULTS)
     }
 
-    // 1v1 Duel Flow
+    // ---------------------------------------------------------------- 1v1 duel
+
+    /** Opens the duel invite screen for [friend]. The entry fee is charged when the invite is sent. */
     fun startDuelChallenge(friend: DuelFriend) {
-        if (!deductCoins(100, "1v1 Duel entry fee")) {
+        if (_userProfile.value.coins < DUEL_ENTRY) {
+            showToast("Not enough coins! You need $DUEL_ENTRY coins.")
             return
         }
+        cancelDuelJobs()
         _duelState.value = DuelState(
             friend = friend,
             phase = DuelPhase.INVITE,
-            questions = SeedData.sampleQuestions,
+            questions = QuestionBank.quizFor("full_mock_test", count = 5),
             currentQuestionIndex = 0
         )
-        _currentScreen.value = Screen.DUEL_CHALLENGE
+        navigateTo(Screen.DUEL_CHALLENGE)
+    }
+
+    /** Opens the duel screen against a random online friend. */
+    fun startQuickDuel() {
+        val friend = SeedData.duelFriends.filter { it.isOnline }.randomOrNull() ?: SeedData.duelFriends.first()
+        startDuelChallenge(friend)
     }
 
     fun advanceDuelToWaiting() {
         val current = _duelState.value
+        if (current.phase != DuelPhase.INVITE) return
+        if (!deductCoins(DUEL_ENTRY, "1v1 Duel entry · ${current.friend?.name ?: "Opponent"}")) return
         _duelState.value = current.copy(phase = DuelPhase.WAITING)
 
-        // Simulate opponent joining after 2.5 seconds
         viewModelScope.launch {
             delay(2500)
-            _duelState.value = _duelState.value.copy(phase = DuelPhase.LIVE_MATCH)
+            if (_duelState.value.phase == DuelPhase.WAITING) {
+                _duelState.value = _duelState.value.copy(phase = DuelPhase.LIVE_MATCH)
+                startDuelRound()
+            }
+        }
+    }
+
+    private fun startDuelRound() {
+        cancelDuelJobs()
+        _duelState.value = _duelState.value.copy(timerSeconds = DUEL_SECONDS_PER_QUESTION)
+
+        // Simulated opponent answers after a random "thinking" delay.
+        val q = _duelState.value.questions.getOrNull(_duelState.value.currentQuestionIndex) ?: return
+        duelOpponentJob = viewModelScope.launch {
+            delay(Random.nextLong(2_000, 9_000))
+            val oppCorrect = Random.nextFloat() < 0.65f
+            val pick = if (oppCorrect) q.correctIndex else q.options.indices.filter { it != q.correctIndex }.random()
+            val s = _duelState.value
+            if (s.opponentChoice == null) {
+                _duelState.value = s.copy(
+                    opponentChoice = pick,
+                    opponentScore = s.opponentScore + if (oppCorrect) 10 else 0
+                )
+            }
+            maybeRevealDuelRound()
+        }
+
+        duelTimerJob = viewModelScope.launch {
+            while (true) {
+                delay(1000)
+                val s = _duelState.value
+                if (s.isRevealed || s.phase != DuelPhase.LIVE_MATCH) break
+                val remaining = s.timerSeconds - 1
+                if (remaining <= 0) {
+                    onDuelTimeUp()
+                    break
+                }
+                _duelState.value = s.copy(timerSeconds = remaining)
+            }
+        }
+    }
+
+    private fun onDuelTimeUp() {
+        duelOpponentJob?.cancel()
+        val s = _duelState.value
+        if (s.questions.getOrNull(s.currentQuestionIndex) == null) return
+        var next = s.copy(timerSeconds = 0)
+        if (next.userChoice == null) next = next.copy(userChoice = -1)
+        if (next.opponentChoice == null) {
+            // Opponent ran out of time too.
+            next = next.copy(opponentChoice = -1)
+        }
+        _duelState.value = next.copy(isRevealed = true)
+    }
+
+    private fun maybeRevealDuelRound() {
+        val s = _duelState.value
+        if (s.userChoice != null && s.opponentChoice != null && !s.isRevealed) {
+            duelTimerJob?.cancel()
+            _duelState.value = s.copy(isRevealed = true)
         }
     }
 
     fun selectDuelOption(optionIndex: Int) {
         val current = _duelState.value
-        if (current.userChoice != null) return
-
-        // Opponent picks random option
-        val q = current.questions[current.currentQuestionIndex]
-        val opponentPick = if (Math.random() > 0.3) q.correctIndex else (0..3).filter { it != q.correctIndex }.random()
-
+        if (current.userChoice != null || current.isRevealed) return
+        val q = current.questions.getOrNull(current.currentQuestionIndex) ?: return
         val userCorrect = optionIndex == q.correctIndex
-        val opponentCorrect = opponentPick == q.correctIndex
-
-        val newUserScore = current.userScore + if (userCorrect) 10 else 0
-        val newOppScore = current.opponentScore + if (opponentCorrect) 10 else 0
-
         _duelState.value = current.copy(
             userChoice = optionIndex,
-            opponentChoice = opponentPick,
-            userScore = newUserScore,
-            opponentScore = newOppScore
+            userScore = current.userScore + if (userCorrect) 10 else 0
         )
+        maybeRevealDuelRound()
     }
 
     fun revealDuelQuestion() {
-        val current = _duelState.value
-        _duelState.value = current.copy(isRevealed = true)
+        _duelState.value = _duelState.value.copy(isRevealed = true)
     }
 
     fun nextDuelQuestion() {
         val current = _duelState.value
+        if (!current.isRevealed) return
         if (current.currentQuestionIndex < current.questions.size - 1) {
             _duelState.value = current.copy(
                 currentQuestionIndex = current.currentQuestionIndex + 1,
@@ -577,57 +849,146 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 opponentChoice = null,
                 isRevealed = false
             )
+            startDuelRound()
         } else {
-            // Match over
-            val isUserWin = current.userScore >= current.opponentScore
-            if (isUserWin) {
-                addCoins(200, "1v1 Duel victory prize")
-            }
-            _duelState.value = current.copy(
-                winnerName = if (isUserWin) "You" else current.friend?.name ?: "Opponent"
-            )
-            showToast(if (isUserWin) "Victory! You won 200 coins!" else "Match over!")
-
-            _quizState.value = QuizState(
-                quizCompleted = true,
-                isWinState = isUserWin,
-                scorePercentage = if (isUserWin) 100 else ((current.userScore.toFloat() / (current.questions.size * 10)) * 100).toInt().coerceIn(0, 100),
-                correctCount = current.userScore / 10,
-                totalCount = current.questions.size,
-                coinsEarnedInQuiz = if (isUserWin) 200 else 0
-            )
-            _currentScreen.value = Screen.RESULTS
+            finishDuel()
         }
     }
 
-    // In-App Shop
+    private fun finishDuel() {
+        cancelDuelJobs()
+        val current = _duelState.value
+        val opponentName = current.friend?.name ?: "Opponent"
+        val isTie = current.userScore == current.opponentScore
+        val isUserWin = current.userScore > current.opponentScore
+        val awarded = when {
+            isUserWin -> DUEL_PRIZE
+            isTie -> DUEL_ENTRY
+            else -> 0
+        }
+        when {
+            isUserWin -> addCoins(DUEL_PRIZE, "1v1 Duel victory vs $opponentName")
+            isTie -> addCoins(DUEL_ENTRY, "1v1 Duel draw refund")
+        }
+        _duelState.value = current.copy(winnerName = if (isUserWin) "You" else if (isTie) null else opponentName)
+        showToast(
+            when {
+                isUserWin -> "Victory! You won $DUEL_PRIZE coins!"
+                isTie -> "It's a draw — entry fee refunded."
+                else -> "$opponentName won this one. Rematch?"
+            }
+        )
+
+        val total = current.questions.size
+        val correct = current.userScore / 10
+        val percent = if (total > 0) correct * 100 / total else 0
+        recordCompletedActivity(percent)
+        awardLeaderboardPoints(correct * 25)
+
+        _quizState.value = QuizState(
+            mode = QuizMode.DUEL,
+            quizCompleted = true,
+            isWinState = isUserWin,
+            isTie = isTie,
+            scorePercentage = percent,
+            correctCount = correct,
+            wrongCount = total - correct,
+            totalCount = total,
+            coinsAwarded = awarded,
+            scoreLabel = "${current.userScore} – ${current.opponentScore}",
+            pointsGained = correct * 25
+        )
+        navigateTo(Screen.RESULTS)
+    }
+
+    fun abandonDuel() {
+        cancelDuelJobs()
+        val s = _duelState.value
+        if (s.phase == DuelPhase.WAITING) {
+            // Invite was never accepted: refund.
+            addCoins(DUEL_ENTRY, "1v1 Duel invite cancelled")
+        }
+        _duelState.value = DuelState()
+    }
+
+    private fun cancelDuelJobs() {
+        duelTimerJob?.cancel()
+        duelOpponentJob?.cancel()
+    }
+
+    /** Re-runs the session shown on the results screen. */
+    fun retryLastSession() {
+        val state = _quizState.value
+        when (state.mode) {
+            QuizMode.PRACTICE -> state.category?.let { startPracticeQuiz(it) } ?: navigateTo(Screen.HOME)
+            QuizMode.DAILY_CHALLENGE -> navigateTo(Screen.CATEGORIES)
+            QuizMode.MOCK_TEST -> startMockTest()
+            QuizMode.DUEL -> _duelState.value.friend?.let { startDuelChallenge(it) } ?: navigateTo(Screen.COMPETE)
+        }
+    }
+
+    // ---------------------------------------------------------------- Shop, streaks & capsules
+
     fun buyCoinPack(pack: CoinPack) {
         addCoins(pack.coins, "Bought ${pack.coins} Coins Pack")
         showToast("Successfully purchased ${pack.coins} Coins!")
     }
 
     fun buyPowerUp(powerUp: PowerUp) {
-        if (deductCoins(powerUp.coinPrice, "Bought ${powerUp.title}")) {
-            if (powerUp.id == "pu_streak_freeze") {
-                val updated = _userProfile.value.copy(freezesOwned = _userProfile.value.freezesOwned + 1)
-                _userProfile.value = updated
-                viewModelScope.launch { repository.saveUserProfile(updated) }
-            }
-            showToast("Successfully purchased ${powerUp.title}!")
+        if (!deductCoins(powerUp.coinPrice, "Bought ${powerUp.title}")) return
+        when (powerUp.id) {
+            "pu_streak_freeze" -> updateProfile { it.copy(freezesOwned = it.freezesOwned + 1) }
+            "pu_hints_5" -> updateProfile { it.copy(hintsOwned = it.hintsOwned + 5) }
+            "pu_hints_15" -> updateProfile { it.copy(hintsOwned = it.hintsOwned + 15) }
         }
+        showToast("Successfully purchased ${powerUp.title}!")
     }
 
     fun buyStreakFreeze() {
         if (deductCoins(200, "Bought Streak Freeze")) {
-            val updated = _userProfile.value.copy(freezesOwned = _userProfile.value.freezesOwned + 1)
-            _userProfile.value = updated
-            viewModelScope.launch { repository.saveUserProfile(updated) }
+            updateProfile { it.copy(freezesOwned = it.freezesOwned + 1) }
             showToast("Streak Freeze acquired!")
         }
     }
 
     fun claimMilestone(days: Int, rewardCoins: Int) {
-        addCoins(rewardCoins, "$days-Day Streak Milestone")
-        showToast("Claimed +$rewardCoins coins!")
+        val profile = _userProfile.value
+        val claimed = Milestones.parseClaimed(profile.claimedMilestones)
+        when {
+            days in claimed -> showToast("Milestone already claimed")
+            profile.longestStreak < days -> showToast("Reach a $days-day streak to unlock this reward")
+            else -> {
+                updateProfile { it.copy(claimedMilestones = Milestones.encodeClaimed(claimed + days)) }
+                addCoins(rewardCoins, "$days-Day Streak Milestone")
+                showToast("Claimed +$rewardCoins coins!")
+            }
+        }
+    }
+
+    fun toggleCapsuleBookmark(capsuleId: String) {
+        val bookmarked = capsuleId in bookmarkedCapsuleIds.value
+        viewModelScope.launch { repository.toggleBookmark(capsuleId, !bookmarked) }
+        showToast(if (bookmarked) "Removed from saved notes" else "Saved to your notes")
+    }
+
+    override fun onCleared() {
+        quizTimerJob?.cancel()
+        mockTimerJob?.cancel()
+        cancelDuelJobs()
+        super.onCleared()
+    }
+
+    companion object {
+        fun initialsFor(name: String): String {
+            val parts = name.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
+            return when {
+                parts.isEmpty() -> "AS"
+                parts.size == 1 -> parts[0].take(2).uppercase()
+                else -> (parts[0].take(1) + parts[1].take(1)).uppercase()
+            }
+        }
+
+        fun generateReferralCode(initials: String): String =
+            initials.uppercase().take(2) + (1000 + Random.nextInt(9000)).toString()
     }
 }

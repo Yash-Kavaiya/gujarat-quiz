@@ -1,6 +1,10 @@
 package com.example.ui.screens
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -24,7 +28,15 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ui.theme.DisplayFontFamily
 import com.example.ui.theme.LocalAppColors
+import com.example.data.QuestionBank
 import com.example.viewmodel.MockTestState
+
+fun formatDuration(totalSeconds: Int): String {
+    val h = totalSeconds / 3600
+    val m = (totalSeconds % 3600) / 60
+    val sec = totalSeconds % 60
+    return if (h > 0) "%d:%02d:%02d".format(h, m, sec) else "%02d:%02d".format(m, sec)
+}
 
 @Composable
 fun MockTestScreen(
@@ -35,10 +47,32 @@ fun MockTestScreen(
     onSetPaletteOpen: (Boolean) -> Unit,
     onSetSubmitModalOpen: (Boolean) -> Unit,
     onSubmitMockTest: () -> Unit,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onGoToSection: (String) -> Unit = {}
 ) {
     val colors = LocalAppColors.current
     val currentQuestion = mockState.questions.getOrNull(mockState.currentIndex) ?: return
+    val totalQuestions = mockState.questions.size
+    var showExitDialog by remember { mutableStateOf(false) }
+
+    BackHandler { showExitDialog = true }
+
+    if (showExitDialog) {
+        AlertDialog(
+            onDismissRequest = { showExitDialog = false },
+            title = { Text("Quit mock test?", fontWeight = FontWeight.Bold) },
+            text = { Text("Your answers will be discarded and the entry fee is not refunded. Submit instead to get your score.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showExitDialog = false
+                    onBack()
+                }) { Text("Quit", color = colors.wrongRed) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showExitDialog = false }) { Text("Continue test") }
+            }
+        )
+    }
 
     Box(
         modifier = Modifier
@@ -61,7 +95,7 @@ fun MockTestScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        IconButton(onClick = onBack) {
+                        IconButton(onClick = { showExitDialog = true }) {
                             Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = colors.ink)
                         }
                         Column {
@@ -71,7 +105,12 @@ fun MockTestScreen(
                     }
 
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(text = "⏱ 1h 58m", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = colors.primary)
+                        Text(
+                            text = "⏱ " + formatDuration(mockState.timeRemainingSeconds),
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (mockState.timeRemainingSeconds <= 300) colors.wrongRed else colors.primary
+                        )
                         Spacer(modifier = Modifier.width(8.dp))
                         IconButton(onClick = { onSetPaletteOpen(true) }) {
                             Icon(Icons.Default.GridView, contentDescription = "Palette", tint = colors.ink)
@@ -80,11 +119,35 @@ fun MockTestScreen(
                 }
             }
 
+            // Section tabs
+            val sections = QuestionBank.mockSections.filter { sec -> mockState.questions.any { it.section == sec } }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                sections.forEach { section ->
+                    val count = mockState.questions.count { it.section == section }
+                    FilterChip(
+                        selected = mockState.activeSection == section,
+                        onClick = { onGoToSection(section) },
+                        label = { Text("$section ($count)", fontSize = 12.sp) },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = colors.primary,
+                            selectedLabelColor = Color.White
+                        )
+                    )
+                }
+            }
+
             // Question Container
             Column(
                 modifier = Modifier
                     .weight(1f)
-                    .padding(20.dp)
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 20.dp, vertical = 8.dp)
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -138,7 +201,7 @@ fun MockTestScreen(
 
                 // Options
                 val selectedOption = mockState.userAnswers[mockState.currentIndex]
-                val optionTexts = listOf(currentQuestion.optionA, currentQuestion.optionB, currentQuestion.optionC, currentQuestion.optionD)
+                val optionTexts = currentQuestion.options
 
                 optionTexts.forEachIndexed { optIdx, optText ->
                     val isSelected = selectedOption == optIdx
@@ -214,7 +277,7 @@ fun MockTestScreen(
         if (mockState.isPaletteOpen) {
             AlertDialog(
                 onDismissRequest = { onSetPaletteOpen(false) },
-                title = { Text("Question Palette (100 Qs)", fontSize = 18.sp, fontWeight = FontWeight.Bold) },
+                title = { Text("Question Palette ($totalQuestions Qs)", fontSize = 18.sp, fontWeight = FontWeight.Bold) },
                 text = {
                     LazyVerticalGrid(
                         columns = GridCells.Fixed(5),
@@ -269,9 +332,10 @@ fun MockTestScreen(
                 title = { Text("Submit Test?", fontSize = 20.sp, fontWeight = FontWeight.Bold) },
                 text = {
                     Column {
-                        Text("You have answered ${mockState.userAnswers.size} of 100 questions.")
+                        Text("You have answered ${mockState.userAnswers.size} of $totalQuestions questions.")
                         Spacer(modifier = Modifier.height(8.dp))
-                        Text("Unattempted questions: ${100 - mockState.userAnswers.size}")
+                        Text("Unattempted questions: ${totalQuestions - mockState.userAnswers.size}")
+                        Text("Time left: ${formatDuration(mockState.timeRemainingSeconds)}")
                         Text("Marked for review: ${mockState.markedForReview.size}")
                     }
                 },

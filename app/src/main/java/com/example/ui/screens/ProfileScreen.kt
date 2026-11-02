@@ -25,6 +25,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.material.icons.filled.Edit
+import com.example.data.DayClock
 import com.example.data.TransactionEntity
 import com.example.data.UserProfileEntity
 import com.example.ui.components.DynamicCoinBalanceCard
@@ -39,9 +41,25 @@ fun ProfileScreen(
     activeTheme: String,
     onOpenCoinShop: () -> Unit,
     onOpenReferralSheet: () -> Unit,
-    onSwitchTheme: (String) -> Unit
+    onSwitchTheme: (String) -> Unit,
+    rank: Int = 0,
+    displayStreak: Int = profile.streakDays,
+    onUpdateProfile: (name: String, city: String) -> Unit = { _, _ -> }
 ) {
     val colors = LocalAppColors.current
+    var showEditDialog by remember { mutableStateOf(false) }
+
+    if (showEditDialog) {
+        EditProfileDialog(
+            initialName = profile.name,
+            initialCity = profile.city,
+            onDismiss = { showEditDialog = false },
+            onSave = { name, city ->
+                onUpdateProfile(name, city)
+                showEditDialog = false
+            }
+        )
+    }
 
     LazyColumn(
         modifier = Modifier
@@ -82,6 +100,20 @@ fun ProfileScreen(
                     fontSize = 13.sp,
                     color = colors.muted
                 )
+                Text(
+                    text = buildString {
+                        if (rank > 0) append("Rank #$rank · ")
+                        append("${profile.hintsOwned} hints · ${profile.freezesOwned} freezes")
+                    },
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = colors.primary
+                )
+                TextButton(onClick = { showEditDialog = true }) {
+                    Icon(Icons.Default.Edit, contentDescription = null, tint = colors.primary, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Edit profile", color = colors.primary, fontSize = 13.sp)
+                }
             }
         }
 
@@ -90,7 +122,7 @@ fun ProfileScreen(
             DynamicCoinBalanceCard(
                 coinBalance = profile.coins,
                 accuracyPercentage = profile.accuracyPercentage,
-                streakDays = profile.streakDays,
+                streakDays = displayStreak,
                 totalQuizzes = profile.totalQuizzes,
                 onEarnMoreClick = onOpenCoinShop,
                 onOpenShopClick = onOpenCoinShop,
@@ -193,7 +225,18 @@ fun ProfileScreen(
             }
         }
 
-        items(transactions) { tx ->
+        if (transactions.isEmpty()) {
+            item {
+                Text(
+                    text = "No transactions yet.",
+                    fontSize = 13.sp,
+                    color = colors.muted,
+                    modifier = Modifier.padding(horizontal = 20.dp)
+                )
+            }
+        }
+
+        items(transactions, key = { it.id }) { tx ->
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -210,7 +253,7 @@ fun ProfileScreen(
                 ) {
                     Column {
                         Text(text = tx.title, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = colors.ink)
-                        Text(text = tx.timeAgo, fontSize = 11.sp, color = colors.muted)
+                        Text(text = DayClock.timeAgo(tx.timestamp), fontSize = 11.sp, color = colors.muted)
                     }
                     Text(
                         text = if (tx.amount >= 0) "+${tx.amount}" else "${tx.amount}",
@@ -222,4 +265,41 @@ fun ProfileScreen(
             }
         }
     }
+}
+
+@Composable
+private fun EditProfileDialog(
+    initialName: String,
+    initialCity: String,
+    onDismiss: () -> Unit,
+    onSave: (String, String) -> Unit
+) {
+    var name by remember { mutableStateOf(initialName) }
+    var city by remember { mutableStateOf(initialCity) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Edit profile", fontWeight = FontWeight.Bold) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it.take(30) },
+                    label = { Text("Name") },
+                    singleLine = true
+                )
+                OutlinedTextField(
+                    value = city,
+                    onValueChange = { city = it.take(30) },
+                    label = { Text("City / District") },
+                    singleLine = true
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onSave(name, city) }, enabled = name.isNotBlank()) { Text("Save") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
 }

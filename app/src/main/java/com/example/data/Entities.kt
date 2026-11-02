@@ -6,22 +6,30 @@ import androidx.room.PrimaryKey
 @Entity(tableName = "user_profile")
 data class UserProfileEntity(
     @PrimaryKey val id: Int = 1,
-    val name: String = "Aakash P.",
-    val initials: String = "AP",
+    val name: String = "Aspirant",
+    val initials: String = "AS",
     val city: String = "Ahmedabad",
-    val goal: String = "GPSC Class 1 & 2",
-    val coins: Int = 7900,
-    val streakDays: Int = 20,
-    val longestStreak: Int = 28,
-    val freezesOwned: Int = 2,
+    val goal: String = "GPSC Class 1 & 2 / Prelims 2026",
+    val coins: Int = 500,
+    val streakDays: Int = 0,
+    val longestStreak: Int = 0,
+    val freezesOwned: Int = 1,
     val theme: String = "Saffron", // Saffron, Indigo, Midnight
-    val onboardingCompleted: Boolean = true,
-    val referralsCount: Int = 4,
-    val totalQuizzes: Int = 28,
-    val accuracyPercentage: Int = 72,
-    val globalRank: Int = 142,
-    val referralCode: String = "AP2026",
-    val avatarUrl: String? = null
+    val onboardingCompleted: Boolean = false,
+    val referralsCount: Int = 0,
+    val totalQuizzes: Int = 0,
+    val accuracyPercentage: Int = 0,
+    val globalRank: Int = 0,
+    val referralCode: String = "AS2026",
+    val avatarUrl: String? = null,
+    /** Local epoch day of the last completed quiz; -1 when the user has never played. */
+    val lastActiveEpochDay: Long = -1,
+    /** Comma separated streak milestone day counts that were already claimed. */
+    val claimedMilestones: String = "",
+    /** 50-50 hints bought from the shop. */
+    val hintsOwned: Int = 0,
+    /** Local epoch day of the last daily challenge attempt; -1 when never played. */
+    val lastDailyChallengeEpochDay: Long = -1
 ) {
     val district: String get() = city
     val currentStreak: Int get() = streakDays
@@ -59,4 +67,11 @@ data class LeaderboardEntity(
     val totalScore: Int,
     val delta: String = "0",
     val isCurrentUser: Boolean = false
+)
+
+@Entity(tableName = "activity_days")
+data class ActivityDayEntity(
+    @PrimaryKey val epochDay: Long,
+    val quizzesCompleted: Int = 0,
+    val isFrozen: Boolean = false
 )

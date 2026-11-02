@@ -5,6 +5,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -30,9 +33,12 @@ fun OnboardingScreen(
     selectedGoal: String,
     onSelectGoal: (String) -> Unit,
     onNextStep: () -> Unit,
-    onClaimGift: () -> Unit
+    onClaimGift: () -> Unit,
+    initialName: String = "",
+    onSubmitName: (String) -> Unit = {}
 ) {
     val colors = LocalAppColors.current
+    var nameInput by rememberSaveable { mutableStateOf(if (initialName == "Aspirant") "" else initialName) }
 
     Box(
         modifier = Modifier
@@ -128,7 +134,11 @@ fun OnboardingScreen(
                     modifier = Modifier.fillMaxSize(),
                     verticalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Column {
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .verticalScroll(rememberScrollState())
+                    ) {
                         Spacer(modifier = Modifier.height(20.dp))
                         Text(
                             text = "STEP 2 OF 3",
@@ -145,7 +155,17 @@ fun OnboardingScreen(
                             fontWeight = FontWeight.Bold,
                             color = colors.ink
                         )
-                        Spacer(modifier = Modifier.height(20.dp))
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        OutlinedTextField(
+                            value = nameInput,
+                            onValueChange = { nameInput = it.take(30) },
+                            label = { Text("Your name") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+
+                        Spacer(modifier = Modifier.height(12.dp))
 
                         goals.forEach { goalOption ->
                             val isSelected = selectedGoal == goalOption
@@ -186,8 +206,13 @@ fun OnboardingScreen(
                         }
                     }
 
+                    Spacer(modifier = Modifier.height(12.dp))
+
                     Button(
-                        onClick = onNextStep,
+                        onClick = {
+                            if (nameInput.isNotBlank()) onSubmitName(nameInput)
+                            onNextStep()
+                        },
                         enabled = selectedGoal.isNotEmpty(),
                         colors = ButtonDefaults.buttonColors(containerColor = colors.primary),
                         modifier = Modifier

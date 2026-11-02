@@ -511,7 +511,7 @@ fun DuelsTab(onStartDuel: (DuelFriend) -> Unit) {
                                         .background(if (friend.isOnline) Color(0xFF4CAF50) else colors.muted)
                                 )
                             }
-                            Text(text = "Win Rate: ${friend.winRate}% · ${friend.district}", fontSize = 12.sp, color = colors.muted)
+                            Text(text = "${friend.status} · ${friend.district}", fontSize = 12.sp, color = colors.muted)
                         }
                     }
                     Button(
@@ -565,7 +565,7 @@ fun MockTestsTab(onOpenMockTest: () -> Unit) {
                 Spacer(modifier = Modifier.height(12.dp))
                 Text(text = "GPSC Class 1-2 Prelims Model Paper I", fontSize = 20.sp, fontFamily = DisplayFontFamily, fontWeight = FontWeight.Bold, color = colors.ink)
                 Spacer(modifier = Modifier.height(6.dp))
-                Text(text = "100 Questions · 2 Hours · CCE Pattern Negative Marking (0.25)", fontSize = 13.sp, color = colors.muted)
+                Text(text = "Full syllabus · 2 Hours · +2 per correct, −0.66 per wrong (⅓ negative)", fontSize = 13.sp, color = colors.muted)
 
                 Spacer(modifier = Modifier.height(16.dp))
                 Button(

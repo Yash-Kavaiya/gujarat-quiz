@@ -29,6 +29,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.example.ui.components.ReferralBottomSheet
 import com.example.ui.screens.*
 import com.example.ui.theme.GujaratQuizTheme
 import com.example.ui.theme.LocalAppColors
@@ -115,6 +116,11 @@ fun MainAppContent(viewModel: MainViewModel) {
     val showReferralSheet by viewModel.showReferralSheet.collectAsState()
     val toastMessage by viewModel.toastMessage.collectAsState()
     val leaderboardUsers by viewModel.leaderboardUsers.collectAsState()
+    val userRank by viewModel.userRank.collectAsState()
+    val displayStreak by viewModel.displayStreak.collectAsState()
+    val activityDays by viewModel.activityDays.collectAsState()
+    val categoryProgress by viewModel.categoryProgress.collectAsState()
+    val bookmarkedCapsuleIds by viewModel.bookmarkedCapsuleIds.collectAsState()
 
     val colors = LocalAppColors.current
 
@@ -149,20 +155,50 @@ fun MainAppContent(viewModel: MainViewModel) {
         }
     }
 
-    LaunchedEffect(currentScreen) {
+    val profileLoaded by viewModel.profileLoaded.collectAsState()
+
+    LaunchedEffect(currentScreen, profileLoaded) {
+        if (!profileLoaded) return@LaunchedEffect
         val targetRoute = currentScreen.toRoute()
         if (navController.currentBackStackEntry?.destination?.route != targetRoute) {
+            val currentNavRoute = navController.currentBackStackEntry?.destination?.route
             navController.navigate(targetRoute) {
-                if (targetRoute in listOf(Routes.HOME, Routes.CATEGORIES, Routes.COMPETE, Routes.PROFILE)) {
-                    popUpTo(Routes.HOME) {
-                        saveState = true
+                when {
+                    // Leaving onboarding: it should not stay on the back stack.
+                    currentNavRoute == Routes.ONBOARDING -> {
+                        popUpTo(navController.graph.id) { inclusive = true }
+                        launchSingleTop = true
                     }
-                    launchSingleTop = true
-                    restoreState = true
+                    targetRoute in listOf(Routes.HOME, Routes.CATEGORIES, Routes.COMPETE, Routes.PROFILE) -> {
+                        popUpTo(Routes.HOME) {
+                            saveState = true
+                        }
+                        launchSingleTop = true
+                        restoreState = true
+                    }
+                    // Results replace the finished session so "back" doesn't return into it.
+                    targetRoute == Routes.RESULTS && currentNavRoute != null &&
+                        currentNavRoute in listOf(Routes.QUIZ_PLAY, Routes.MOCK_TEST, Routes.DUEL_CHALLENGE) -> {
+                        popUpTo(currentNavRoute) { inclusive = true }
+                    }
+                    // Retrying from results replaces the results screen.
+                    currentNavRoute == Routes.RESULTS -> {
+                        popUpTo(Routes.RESULTS) { inclusive = true }
+                    }
                 }
             }
         }
     }
+
+    if (!profileLoaded) {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            CircularProgressIndicator(color = colors.primary)
+        }
+        return
+    }
+
+    // Fixed for the lifetime of the NavHost; later changes are handled by navigate().
+    val startRoute = remember { currentScreen.toRoute() }
 
     val showBottomBar = currentRoute in listOf(
         Routes.HOME,
@@ -213,7 +249,7 @@ fun MainAppContent(viewModel: MainViewModel) {
         ) {
             NavHost(
                 navController = navController,
-                startDestination = currentScreen.toRoute()
+                startDestination = startRoute
             ) {
                 composable(Routes.ONBOARDING) {
                     OnboardingScreen(
@@ -221,7 +257,9 @@ fun MainAppContent(viewModel: MainViewModel) {
                         selectedGoal = userProfile.goal,
                         onSelectGoal = { viewModel.setGoal(it) },
                         onNextStep = { viewModel.nextOnboardingStep() },
-                        onClaimGift = { viewModel.claimWelcomeGift() }
+                        onClaimGift = { viewModel.claimWelcomeGift() },
+                        initialName = userProfile.name,
+                        onSubmitName = { name -> viewModel.updateNameAndCity(name, userProfile.city) }
                     )
                 }
 
@@ -229,10 +267,10 @@ fun MainAppContent(viewModel: MainViewModel) {
                     HomeScreen(
                         userName = userProfile.name,
                         userInitials = userProfile.initials,
-                        streakDays = userProfile.streakDays,
+                        streakDays = displayStreak,
                         coinBalance = userProfile.coins,
                         accuracy = userProfile.accuracyPercentage,
-                        rank = userProfile.globalRank,
+                        rank = userRank,
                         quizzesCount = userProfile.totalQuizzes,
                         onStartDailyChallenge = { viewModel.startDailyChallenge() },
                         onCategoryClick = { category -> viewModel.startPracticeQuiz(category) },
@@ -243,8 +281,9 @@ fun MainAppContent(viewModel: MainViewModel) {
                         onStreakClick = { viewModel.navigateTo(Screen.STREAK_CALENDAR) },
                         onCoinsClick = { viewModel.navigateTo(Screen.COIN_SHOP) },
                         onCapsulesClick = { viewModel.navigateTo(Screen.CAPSULES) },
-                        onDuelClick = { viewModel.navigateTo(Screen.DUEL_CHALLENGE) },
-                        onMockTestClick = { viewModel.startMockTest() }
+                        onDuelClick = { viewModel.startQuickDuel() },
+                        onMockTestClick = { viewModel.startMockTest() },
+                        dailyChallengePlayed = userProfile.lastDailyChallengeEpochDay == com.example.data.DayClock.epochDay()
                     )
                 }
 
@@ -252,12 +291,13 @@ fun MainAppContent(viewModel: MainViewModel) {
                     CategoriesScreen(
                         userName = userProfile.name,
                         userInitials = userProfile.initials,
-                        streakDays = userProfile.streakDays,
+                        streakDays = displayStreak,
                         coinBalance = userProfile.coins,
                         onCategoryClick = { category -> viewModel.startPracticeQuiz(category) },
                         onAvatarClick = { viewModel.selectBottomTab(3) },
                         onStreakClick = { viewModel.navigateTo(Screen.STREAK_CALENDAR) },
-                        onCoinsClick = { viewModel.navigateTo(Screen.COIN_SHOP) }
+                        onCoinsClick = { viewModel.navigateTo(Screen.COIN_SHOP) },
+                        progress = categoryProgress
                     )
                 }
 
@@ -278,7 +318,10 @@ fun MainAppContent(viewModel: MainViewModel) {
                         activeTheme = activeTheme,
                         onOpenCoinShop = { viewModel.navigateTo(Screen.COIN_SHOP) },
                         onOpenReferralSheet = { viewModel.setShowReferralSheet(true) },
-                        onSwitchTheme = { themeName -> viewModel.switchTheme(themeName) }
+                        onSwitchTheme = { themeName -> viewModel.switchTheme(themeName) },
+                        rank = userRank,
+                        displayStreak = displayStreak,
+                        onUpdateProfile = { name, city -> viewModel.updateNameAndCity(name, city) }
                     )
                 }
 
@@ -286,10 +329,14 @@ fun MainAppContent(viewModel: MainViewModel) {
                     QuizPlayScreen(
                         quizState = quizState,
                         userCoins = userProfile.coins,
+                        hintsOwned = userProfile.hintsOwned,
                         onSelectOption = { viewModel.selectQuizOption(it) },
                         onUseHint = { viewModel.useQuizHint() },
                         onNextQuestion = { viewModel.nextQuizQuestion() },
-                        onBack = { if (!navController.popBackStack()) viewModel.navigateTo(Screen.HOME) }
+                        onBack = {
+                            viewModel.abandonQuiz()
+                            if (!navController.popBackStack()) viewModel.navigateTo(Screen.HOME)
+                        }
                     )
                 }
 
@@ -297,11 +344,7 @@ fun MainAppContent(viewModel: MainViewModel) {
                     ResultsScreen(
                         quizState = quizState,
                         onHome = { viewModel.navigateTo(Screen.HOME) },
-                        onRetry = {
-                            quizState.category?.let { cat ->
-                                viewModel.startPracticeQuiz(cat)
-                            } ?: viewModel.navigateTo(Screen.HOME)
-                        }
+                        onRetry = { viewModel.retryLastSession() }
                     )
                 }
 
@@ -314,7 +357,11 @@ fun MainAppContent(viewModel: MainViewModel) {
                         onSetPaletteOpen = { viewModel.setMockPaletteOpen(it) },
                         onSetSubmitModalOpen = { viewModel.setMockSubmitModalOpen(it) },
                         onSubmitMockTest = { viewModel.submitMockTest() },
-                        onBack = { if (!navController.popBackStack()) viewModel.navigateTo(Screen.COMPETE) }
+                        onGoToSection = { viewModel.goToMockSection(it) },
+                        onBack = {
+                            viewModel.quitMockTest()
+                            if (!navController.popBackStack()) viewModel.navigateTo(Screen.COMPETE)
+                        }
                     )
                 }
 
@@ -332,13 +379,18 @@ fun MainAppContent(viewModel: MainViewModel) {
                         profile = userProfile,
                         onBuyFreeze = { viewModel.buyStreakFreeze() },
                         onClaimMilestone = { days, coins -> viewModel.claimMilestone(days, coins) },
-                        onBack = { if (!navController.popBackStack()) viewModel.navigateTo(Screen.HOME) }
+                        onBack = { if (!navController.popBackStack()) viewModel.navigateTo(Screen.HOME) },
+                        displayStreak = displayStreak,
+                        activityDays = activityDays
                     )
                 }
 
                 composable(Routes.CAPSULES) {
                     CapsulesScreen(
-                        onBack = { if (!navController.popBackStack()) viewModel.navigateTo(Screen.HOME) }
+                        onBack = { if (!navController.popBackStack()) viewModel.navigateTo(Screen.HOME) },
+                        bookmarkedIds = bookmarkedCapsuleIds,
+                        onToggleBookmark = { viewModel.toggleCapsuleBookmark(it) },
+                        onPractice = { categoryId -> viewModel.startPracticeForCategoryId(categoryId) }
                     )
                 }
 
@@ -349,77 +401,20 @@ fun MainAppContent(viewModel: MainViewModel) {
                         onSelectOption = { viewModel.selectDuelOption(it) },
                         onRevealQuestion = { viewModel.revealDuelQuestion() },
                         onNextQuestion = { viewModel.nextDuelQuestion() },
-                        onBack = { if (!navController.popBackStack()) viewModel.navigateTo(Screen.COMPETE) }
+                        onBack = {
+                            viewModel.abandonDuel()
+                            if (!navController.popBackStack()) viewModel.navigateTo(Screen.COMPETE)
+                        }
                     )
                 }
             }
 
             // Referral Bottom Sheet Modal
             if (showReferralSheet) {
-                ModalBottomSheet(
-                    onDismissRequest = { viewModel.setShowReferralSheet(false) },
-                    containerColor = colors.card
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(24.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Text(
-                            text = "REFER & EARN COINS",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = colors.primary,
-                            letterSpacing = 1.5.sp
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "Give 500 Coins, Get 500 Coins",
-                            fontSize = 22.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = colors.ink
-                        )
-                        Spacer(modifier = Modifier.height(12.dp))
-                        Text(
-                            text = "Share your unique referral code with fellow GPSC & GSSSB aspirants across Gujarat.",
-                            fontSize = 14.sp,
-                            color = colors.muted,
-                            modifier = Modifier.padding(horizontal = 16.dp)
-                        )
-
-                        Spacer(modifier = Modifier.height(20.dp))
-
-                        Card(
-                            shape = RoundedCornerShape(12.dp),
-                            colors = CardDefaults.cardColors(containerColor = colors.primaryLight)
-                        ) {
-                            Text(
-                                text = "GUJ-${userProfile.referralCode}",
-                                fontSize = 24.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = colors.primary,
-                                modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp)
-                            )
-                        }
-
-                        Spacer(modifier = Modifier.height(24.dp))
-
-                        Button(
-                            onClick = {
-                                viewModel.setShowReferralSheet(false)
-                                viewModel.showToast("Referral link copied to clipboard!")
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = colors.primary),
-                            shape = RoundedCornerShape(14.dp),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(50.dp)
-                        ) {
-                            Text(text = "Copy Referral Code", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                        }
-                    }
-                }
+                ReferralBottomSheet(
+                    onDismiss = { viewModel.setShowReferralSheet(false) },
+                    referralCode = "GUJ-${userProfile.referralCode}"
+                )
             }
         }
     }

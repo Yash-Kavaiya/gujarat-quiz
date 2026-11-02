@@ -270,12 +270,12 @@ fun FloatingBottomNavBar(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ReferralBottomSheet(
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    referralCode: String = "GUJ2026AP"
 ) {
     val colors = LocalAppColors.current
     val context = LocalContext.current
     var isCopied by remember { mutableStateOf(false) }
-    val referralCode = "GUJ2026AP"
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -371,7 +371,7 @@ fun ReferralBottomSheet(
             Spacer(modifier = Modifier.height(16.dp))
 
             Button(
-                onClick = { /* WhatsApp share logic */ },
+                onClick = { shareReferral(context, referralCode, viaWhatsApp = true) },
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF25D366)),
                 modifier = Modifier
                     .fillMaxWidth()
@@ -400,7 +400,7 @@ fun ReferralBottomSheet(
                 shape = RoundedCornerShape(12.dp)
             ) {
                 Text(
-                    text = "4 / 10 referrals this month · Resets on the 1st",
+                    text = "You both get 500 coins when they join with your code",
                     fontSize = 12.sp,
                     color = colors.muted,
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
@@ -452,4 +452,29 @@ fun CircularTimer(
             fontFamily = NumericFontFamily
         )
     }
+}
+
+/** Message used when sharing a referral code. */
+fun referralMessage(referralCode: String): String =
+    "I'm preparing for GPSC, GSSSB & Talati exams on Gujarat Quiz 📚 " +
+        "Join with my code $referralCode and we both get 500 coins!"
+
+/**
+ * Shares the referral message. When [viaWhatsApp] is true WhatsApp is tried first and the
+ * generic share sheet is used as a fallback if it isn't installed.
+ */
+fun shareReferral(context: android.content.Context, referralCode: String, viaWhatsApp: Boolean = false) {
+    val base = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+        type = "text/plain"
+        putExtra(android.content.Intent.EXTRA_TEXT, referralMessage(referralCode))
+    }
+    if (viaWhatsApp) {
+        try {
+            context.startActivity(android.content.Intent(base).setPackage("com.whatsapp"))
+            return
+        } catch (e: android.content.ActivityNotFoundException) {
+            // WhatsApp not installed; fall through to the chooser.
+        }
+    }
+    context.startActivity(android.content.Intent.createChooser(base, "Invite friends"))
 }
