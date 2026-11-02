@@ -20,7 +20,31 @@ import androidx.compose.ui.unit.sp
 import com.example.ui.components.GoldCoinIcon
 import com.example.ui.theme.DisplayFontFamily
 import com.example.ui.theme.LocalAppColors
+import androidx.activity.compose.BackHandler
+import androidx.compose.ui.text.style.TextAlign
+import com.example.viewmodel.QuizMode
 import com.example.viewmodel.QuizState
+
+private fun QuizState.retryLabel(): String = when (mode) {
+    QuizMode.PRACTICE -> "Try Again"
+    QuizMode.DAILY_CHALLENGE -> "Practice More"
+    QuizMode.MOCK_TEST -> "New Mock"
+    QuizMode.DUEL -> "Rematch"
+}
+
+private fun QuizState.headline(): String = when (mode) {
+    QuizMode.PRACTICE -> "QUIZ COMPLETED"
+    QuizMode.DAILY_CHALLENGE -> "DAILY CHALLENGE COMPLETED"
+    QuizMode.MOCK_TEST -> "MOCK TEST SUBMITTED"
+    QuizMode.DUEL -> "DUEL FINISHED"
+}
+
+private fun QuizState.title(): String = when {
+    mode == QuizMode.DUEL && isTie -> "It's a Draw!"
+    mode == QuizMode.DUEL && !isWinState -> "Defeat — Rematch?"
+    scorePercentage >= 60 -> "Well Done!"
+    else -> "Good Effort!"
+}
 
 @Composable
 fun ResultsScreen(
@@ -29,6 +53,8 @@ fun ResultsScreen(
     onRetry: () -> Unit
 ) {
     val colors = LocalAppColors.current
+
+    BackHandler(onBack = onHome)
 
     if (quizState.isWinState) {
         // Full screen Big Win Gold Celebration
@@ -52,7 +78,7 @@ fun ResultsScreen(
                 )
                 Spacer(modifier = Modifier.height(16.dp))
                 Text(
-                    text = "BIG WIN!",
+                    text = if (quizState.mode == QuizMode.DUEL) "VICTORY!" else "BIG WIN!",
                     fontSize = 42.sp,
                     fontFamily = DisplayFontFamily,
                     fontWeight = FontWeight.Bold,
@@ -77,11 +103,19 @@ fun ResultsScreen(
                     ) {
                         Text(text = "SCORE ACCURACY", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = colors.muted)
                         Text(text = "${quizState.scorePercentage}%", fontSize = 48.sp, fontWeight = FontWeight.Bold, color = colors.primary)
+                        quizState.scoreLabel?.let {
+                            Text(text = it, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = colors.ink)
+                        }
+                        Text(
+                            text = "${quizState.correctCount} / ${quizState.totalCount} correct · +${quizState.pointsGained} rank pts",
+                            fontSize = 13.sp,
+                            color = colors.muted
+                        )
                         Spacer(modifier = Modifier.height(12.dp))
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             GoldCoinIcon(sizeDp = 28)
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text(text = "+${quizState.coinsEarnedInQuiz + 200} Coins Won", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = colors.accentGold)
+                            Text(text = "+${quizState.coinsAwarded} Coins Won", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = colors.accentGold)
                         }
                     }
                 }
@@ -100,7 +134,7 @@ fun ResultsScreen(
                     ) {
                         Icon(Icons.Default.Refresh, contentDescription = null)
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Retry", fontWeight = FontWeight.Bold)
+                        Text(quizState.retryLabel(), fontWeight = FontWeight.Bold)
                     }
 
                     Button(
@@ -132,9 +166,9 @@ fun ResultsScreen(
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Spacer(modifier = Modifier.height(20.dp))
-                    Text(text = "QUIZ COMPLETED", fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp, color = colors.muted)
+                    Text(text = quizState.headline(), fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp, color = colors.muted)
                     Spacer(modifier = Modifier.height(8.dp))
-                    Text(text = "Good Effort!", fontSize = 32.sp, fontFamily = DisplayFontFamily, fontWeight = FontWeight.Bold, color = colors.ink)
+                    Text(text = quizState.title(), fontSize = 32.sp, fontFamily = DisplayFontFamily, fontWeight = FontWeight.Bold, color = colors.ink)
 
                     Spacer(modifier = Modifier.height(32.dp))
 
@@ -148,6 +182,9 @@ fun ResultsScreen(
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Text(text = "${quizState.scorePercentage}%", fontSize = 42.sp, fontWeight = FontWeight.Bold, color = colors.primary)
                             Text(text = "${quizState.correctCount} / ${quizState.totalCount} Correct", fontSize = 13.sp, color = colors.muted)
+                            quizState.scoreLabel?.let {
+                                Text(text = it, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = colors.ink, textAlign = TextAlign.Center)
+                            }
                         }
                     }
 
@@ -171,11 +208,15 @@ fun ResultsScreen(
                             }
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                 Text(text = "Wrong", fontSize = 12.sp, color = colors.muted)
-                                Text(text = "${quizState.totalCount - quizState.correctCount}", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = colors.wrongRed)
+                                Text(text = "${quizState.wrongCount}", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = colors.wrongRed)
+                            }
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text(text = "Skipped", fontSize = 12.sp, color = colors.muted)
+                                Text(text = "${quizState.unattemptedCount}", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = colors.muted)
                             }
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                 Text(text = "Earned", fontSize = 12.sp, color = colors.muted)
-                                Text(text = "+${quizState.coinsEarnedInQuiz} coins", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = colors.accentGold)
+                                Text(text = "+${quizState.coinsAwarded}", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = colors.accentGold)
                             }
                         }
                     }
@@ -192,7 +233,7 @@ fun ResultsScreen(
                     ) {
                         Icon(Icons.Default.Refresh, contentDescription = null)
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Try Again", fontWeight = FontWeight.Bold)
+                        Text(quizState.retryLabel(), fontWeight = FontWeight.Bold)
                     }
 
                     Button(

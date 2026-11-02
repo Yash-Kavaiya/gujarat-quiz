@@ -55,4 +55,16 @@ interface AppDao {
 
     @Query("SELECT * FROM leaderboard_users WHERE isCurrentUser = 1 LIMIT 1")
     suspend fun getCurrentUserLeaderboardEntity(): LeaderboardEntity?
+
+    @Query("SELECT * FROM activity_days ORDER BY epochDay")
+    fun getActivityDays(): Flow<List<ActivityDayEntity>>
+
+    @Query("SELECT * FROM activity_days WHERE epochDay = :epochDay LIMIT 1")
+    suspend fun getActivityDay(epochDay: Long): ActivityDayEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertActivityDays(days: List<ActivityDayEntity>)
+
+    @Query("SELECT * FROM category_progress WHERE categoryId = :categoryId LIMIT 1")
+    suspend fun getProgress(categoryId: String): CategoryProgressEntity?
 }

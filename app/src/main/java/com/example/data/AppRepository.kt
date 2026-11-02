@@ -9,6 +9,30 @@ class AppRepository(private val appDao: AppDao) {
     val categoryProgressList: Flow<List<CategoryProgressEntity>> = appDao.getAllProgress()
     val bookmarkedCapsules: Flow<List<BookmarkedCapsuleEntity>> = appDao.getBookmarkedCapsules()
     val leaderboardEntries: Flow<List<LeaderboardEntity>> = appDao.getLeaderboardUsers()
+    val activityDays: Flow<List<ActivityDayEntity>> = appDao.getActivityDays()
+
+    /** Records a completed quiz for [epochDay] and marks [frozenDays] as protected by a freeze. */
+    suspend fun recordActivity(epochDay: Long, frozenDays: List<Long>) {
+        val existing = appDao.getActivityDay(epochDay)
+        val today = ActivityDayEntity(
+            epochDay = epochDay,
+            quizzesCompleted = (existing?.quizzesCompleted ?: 0) + 1,
+            isFrozen = false
+        )
+        appDao.upsertActivityDays(frozenDays.map { ActivityDayEntity(epochDay = it, isFrozen = true) } + today)
+    }
+
+    suspend fun recordCategoryResult(categoryId: String, scorePercent: Int) {
+        val existing = appDao.getProgress(categoryId)
+        appDao.saveProgress(
+            CategoryProgressEntity(
+                categoryId = categoryId,
+                isUnlocked = true,
+                quizzesCompleted = (existing?.quizzesCompleted ?: 0) + 1,
+                bestScorePercent = maxOf(existing?.bestScorePercent ?: 0, scorePercent)
+            )
+        )
+    }
 
     suspend fun seedLeaderboardIfEmpty() {
         if (appDao.getLeaderboardCount() == 0) {
@@ -23,7 +47,7 @@ class AppRepository(private val appDao: AppDao) {
                 LeaderboardEntity(id = "l8", name = "Pooja K.", initials = "PK", city = "Junagadh", totalScore = 4320, delta = "-2"),
                 LeaderboardEntity(id = "l9", name = "Anand B.", initials = "AB", city = "Anand", totalScore = 4250, delta = "0"),
                 LeaderboardEntity(id = "l10", name = "Dhaval M.", initials = "DM", city = "Mehsana", totalScore = 4180, delta = "+5"),
-                LeaderboardEntity(id = "l_user", name = "Aakash P. (You)", initials = "AP", city = "Ahmedabad", totalScore = 4012, delta = "↑ 38", isCurrentUser = true)
+                LeaderboardEntity(id = "l_user", name = "You", initials = "AS", city = "Ahmedabad", totalScore = 0, delta = "0", isCurrentUser = true)
             )
             appDao.insertLeaderboardUsers(defaultUsers)
         }
@@ -31,19 +55,27 @@ class AppRepository(private val appDao: AppDao) {
 
     suspend fun updateUserQuizScore(pointsEarned: Int, userName: String, userCity: String, userInitials: String) {
         val existing = appDao.getCurrentUserLeaderboardEntity()
-        val currentScore = existing?.totalScore ?: 4012
+        val currentScore = existing?.totalScore ?: 0
         val newScore = currentScore + pointsEarned
         val updatedEntity = LeaderboardEntity(
             id = "l_user",
-            name = if (userName.contains("(You)")) userName else "$userName (You)",
-            initials = userInitials.ifEmpty { "AP" },
+            name = displayName(userName),
+            initials = userInitials.ifEmpty { "AS" },
             city = userCity.ifEmpty { "Ahmedabad" },
             totalScore = newScore,
-            delta = "+$pointsEarned",
+            delta = if (pointsEarned > 0) "+$pointsEarned" else existing?.delta ?: "0",
             isCurrentUser = true
         )
         appDao.insertOrUpdateLeaderboardUser(updatedEntity)
     }
+
+    /** Keeps the leaderboard row in sync after the user edits their name or city. */
+    suspend fun syncLeaderboardIdentity(userName: String, userCity: String, userInitials: String) {
+        updateUserQuizScore(0, userName, userCity, userInitials)
+    }
+
+    private fun displayName(userName: String): String =
+        if (userName.contains("(You)")) userName else "$userName (You)"
 
     suspend fun saveUserProfile(profile: UserProfileEntity) {
         appDao.insertOrUpdateProfile(profile)

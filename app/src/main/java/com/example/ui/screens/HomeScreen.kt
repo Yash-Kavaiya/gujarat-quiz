@@ -13,6 +13,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -48,8 +49,12 @@ fun HomeScreen(
     onCoinsClick: () -> Unit,
     onCapsulesClick: () -> Unit,
     onDuelClick: () -> Unit,
-    onMockTestClick: () -> Unit
+    onMockTestClick: () -> Unit,
+    dailyChallengePlayed: Boolean = false
 ) {
+    val todayLabel = remember {
+        "TODAY · " + java.text.SimpleDateFormat("d MMMM", java.util.Locale.ENGLISH).format(java.util.Date()).uppercase()
+    }
     val colors = LocalAppColors.current
 
     Column(
@@ -92,7 +97,7 @@ fun HomeScreen(
                     ) {
                         Column {
                             Text(
-                                text = "TODAY · 18 APRIL",
+                                text = todayLabel,
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
                                 letterSpacing = 1.5.sp,
@@ -100,7 +105,7 @@ fun HomeScreen(
                             )
                             Spacer(modifier = Modifier.height(6.dp))
                             Text(
-                                text = "Daily Challenge:\nConstitution & Polity",
+                                text = "Daily Challenge:\nMixed GK Sprint",
                                 fontSize = 22.sp,
                                 fontWeight = FontWeight.Bold,
                                 fontFamily = DisplayFontFamily,
@@ -116,15 +121,15 @@ fun HomeScreen(
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Icon(Icons.Default.Timer, contentDescription = null, tint = Color.White.copy(alpha = 0.8f), modifier = Modifier.size(16.dp))
                                     Spacer(modifier = Modifier.width(4.dp))
-                                    Text("10 min", fontSize = 13.sp, color = Color.White.copy(alpha = 0.9f))
+                                    Text("30s / Q", fontSize = 13.sp, color = Color.White.copy(alpha = 0.9f))
                                 }
                                 Text("·", color = Color.White.copy(alpha = 0.6f))
-                                Text("15 Qs", fontSize = 13.sp, color = Color.White.copy(alpha = 0.9f))
+                                Text("10 Qs", fontSize = 13.sp, color = Color.White.copy(alpha = 0.9f))
                                 Text("·", color = Color.White.copy(alpha = 0.6f))
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     GoldCoinIcon(sizeDp = 16)
                                     Spacer(modifier = Modifier.width(4.dp))
-                                    Text("5,000 prize pool", fontSize = 13.sp, color = Color(0xFFFFD54F), fontWeight = FontWeight.Bold)
+                                    Text("+500 perfect bonus", fontSize = 13.sp, color = Color(0xFFFFD54F), fontWeight = FontWeight.Bold)
                                 }
                             }
 
@@ -132,7 +137,11 @@ fun HomeScreen(
 
                             Button(
                                 onClick = onStartDailyChallenge,
-                                colors = ButtonDefaults.buttonColors(containerColor = Color.White),
+                                enabled = !dailyChallengePlayed,
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = Color.White,
+                                    disabledContainerColor = Color.White.copy(alpha = 0.5f)
+                                ),
                                 shape = RoundedCornerShape(16.dp),
                                 modifier = Modifier.testTag("enter_daily_challenge")
                             ) {
@@ -140,7 +149,11 @@ fun HomeScreen(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
-                                    Text("Enter · 50 coins", color = Color(0xFF2C224E), fontWeight = FontWeight.Bold)
+                                    Text(
+                                        if (dailyChallengePlayed) "Completed · back tomorrow" else "Enter · 50 coins",
+                                        color = Color(0xFF2C224E),
+                                        fontWeight = FontWeight.Bold
+                                    )
                                     Icon(Icons.Default.ArrowForward, contentDescription = null, tint = Color(0xFF2C224E), modifier = Modifier.size(16.dp))
                                 }
                             }
@@ -178,8 +191,6 @@ fun HomeScreen(
                             Spacer(modifier = Modifier.height(2.dp))
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text("Accuracy", fontSize = 11.sp, color = colors.muted)
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("+4", fontSize = 11.sp, color = colors.success, fontWeight = FontWeight.Bold)
                             }
                         }
                     }
@@ -191,12 +202,10 @@ fun HomeScreen(
                         colors = CardDefaults.cardColors(containerColor = colors.card)
                     ) {
                         Column(modifier = Modifier.padding(14.dp)) {
-                            Text("#$rank", fontSize = 22.sp, fontWeight = FontWeight.Bold, fontFamily = NumericFontFamily, color = colors.ink)
+                            Text(if (rank > 0) "#$rank" else "–", fontSize = 22.sp, fontWeight = FontWeight.Bold, fontFamily = NumericFontFamily, color = colors.ink)
                             Spacer(modifier = Modifier.height(2.dp))
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text("Rank", fontSize = 11.sp, color = colors.muted)
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("↑ 38", fontSize = 11.sp, color = colors.success, fontWeight = FontWeight.Bold)
                             }
                         }
                     }
@@ -501,8 +510,8 @@ fun HomeScreen(
                         Column {
                             Text("WEEKLY COMPETITION", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = colors.accent, letterSpacing = 1.sp)
                             Spacer(modifier = Modifier.height(2.dp))
-                            Text("Leaderboard closes in 2d 14h", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                            Text("Top 3 aspirants win 5,000 coins each", fontSize = 12.sp, color = Color.White.copy(alpha = 0.7f))
+                            Text("Climb the Gujarat leaderboard", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                            Text("Earn 25 rank points for every correct answer", fontSize = 12.sp, color = Color.White.copy(alpha = 0.7f))
                         }
                         Icon(Icons.Default.ArrowForward, contentDescription = null, tint = colors.accent)
                     }

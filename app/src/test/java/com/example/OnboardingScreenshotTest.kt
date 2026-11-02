@@ -2,7 +2,8 @@ package com.example
 
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onRoot
-import com.example.ui.theme.MyApplicationTheme
+import com.example.ui.screens.OnboardingScreen
+import com.example.ui.theme.GujaratQuizTheme
 import com.github.takahirom.roborazzi.RobolectricDeviceQualifiers
 import com.github.takahirom.roborazzi.captureRoboImage
 import org.junit.Rule
@@ -15,14 +16,24 @@ import org.robolectric.annotation.GraphicsMode
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @Config(qualifiers = RobolectricDeviceQualifiers.Pixel8, sdk = [36])
-class GreetingScreenshotTest {
+class OnboardingScreenshotTest {
 
   @get:Rule val composeTestRule = createComposeRule()
 
   @Test
-  fun greeting_screenshot() {
-    composeTestRule.setContent { MyApplicationTheme { Greeting("Robolectric") } }
+  fun onboarding_welcome_screenshot() {
+    composeTestRule.setContent {
+      GujaratQuizTheme {
+        OnboardingScreen(
+          step = 1,
+          selectedGoal = "GPSC Class 1 & 2 / Prelims 2026",
+          onSelectGoal = {},
+          onNextStep = {},
+          onClaimGift = {}
+        )
+      }
+    }
 
-    composeTestRule.onRoot().captureRoboImage(filePath = "src/test/screenshots/greeting.png")
+    composeTestRule.onRoot().captureRoboImage(filePath = "src/test/screenshots/onboarding_welcome.png")
   }
 }

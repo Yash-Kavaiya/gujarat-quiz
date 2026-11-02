@@ -5,6 +5,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -21,6 +23,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.activity.compose.BackHandler
+import com.example.ui.components.CircularTimer
 import com.example.ui.components.CoinBalanceBadge
 import com.example.ui.components.GoldCoinIcon
 import com.example.ui.theme.DisplayFontFamily
@@ -31,6 +35,7 @@ import com.example.viewmodel.QuizState
 fun QuizPlayScreen(
     quizState: QuizState,
     userCoins: Int,
+    hintsOwned: Int = 0,
     onSelectOption: (Int) -> Unit,
     onUseHint: () -> Unit,
     onNextQuestion: () -> Unit,
@@ -38,6 +43,26 @@ fun QuizPlayScreen(
 ) {
     val colors = LocalAppColors.current
     val currentQuestion = quizState.questions.getOrNull(quizState.currentIndex) ?: return
+    var showExitDialog by remember { mutableStateOf(false) }
+
+    BackHandler { showExitDialog = true }
+
+    if (showExitDialog) {
+        AlertDialog(
+            onDismissRequest = { showExitDialog = false },
+            title = { Text("Leave quiz?", fontWeight = FontWeight.Bold) },
+            text = { Text("Your progress in this quiz will be lost and the entry fee is not refunded.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showExitDialog = false
+                    onBack()
+                }) { Text("Leave", color = colors.wrongRed) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showExitDialog = false }) { Text("Keep playing") }
+            }
+        )
+    }
 
     Box(
         modifier = Modifier
@@ -57,7 +82,7 @@ fun QuizPlayScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                IconButton(onClick = onBack) {
+                IconButton(onClick = { showExitDialog = true }) {
                     Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = colors.ink)
                 }
                 Text(
@@ -77,23 +102,34 @@ fun QuizPlayScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Surface(
-                    color = colors.primaryLight,
-                    shape = RoundedCornerShape(12.dp)
-                ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularTimer(
+                        totalSeconds = quizState.timerTotalSeconds,
+                        currentSeconds = quizState.timerSeconds,
+                        modifier = Modifier.size(48.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "⏱ 30s Timer",
+                        text = quizState.category?.titleEn ?: "Quiz",
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
-                        color = colors.primary,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                        color = colors.muted,
+                        maxLines = 1
                     )
                 }
 
-                TextButton(onClick = onUseHint) {
+                TextButton(
+                    onClick = onUseHint,
+                    enabled = !quizState.isRevealed && quizState.eliminatedOptions.isEmpty()
+                ) {
                     Icon(Icons.Default.Lightbulb, contentDescription = null, tint = colors.accentGold, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text(text = "50-50 Hint (50 coins)", fontSize = 12.sp, color = colors.accentGold, fontWeight = FontWeight.Bold)
+                    Text(
+                        text = if (hintsOwned > 0) "50-50 Hint ($hintsOwned left)" else "50-50 Hint (50 coins)",
+                        fontSize = 12.sp,
+                        color = colors.accentGold,
+                        fontWeight = FontWeight.Bold
+                    )
                 }
             }
 
@@ -129,10 +165,12 @@ fun QuizPlayScreen(
             // Options List
             Column(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier.weight(1f)
+                modifier = Modifier
+                    .weight(1f)
+                    .verticalScroll(rememberScrollState())
             ) {
                 val optionLabels = listOf("A", "B", "C", "D")
-                val optionTexts = listOf(currentQuestion.optionA, currentQuestion.optionB, currentQuestion.optionC, currentQuestion.optionD)
+                val optionTexts = currentQuestion.options
 
                 optionTexts.forEachIndexed { index, optionText ->
                     val isEliminated = quizState.eliminatedOptions.contains(index)
@@ -182,7 +220,7 @@ fun QuizPlayScreen(
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Text(
-                                        text = optionLabels[index],
+                                        text = optionLabels.getOrElse(index) { "${index + 1}" },
                                         fontSize = 14.sp,
                                         fontWeight = FontWeight.Bold,
                                         color = if (isEliminated) colors.muted else colors.ink
@@ -218,11 +256,13 @@ fun QuizPlayScreen(
                             .padding(top = 8.dp)
                     ) {
                         Column(modifier = Modifier.padding(16.dp)) {
+                            if (quizState.timedOut) {
+                                Text(text = "⏱ TIME'S UP", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = colors.wrongRed)
+                                Spacer(modifier = Modifier.height(4.dp))
+                            }
                             Text(text = "EXPLANATION", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = colors.primary)
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(text = currentQuestion.explanationEn, fontSize = 13.sp, color = colors.ink)
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(text = currentQuestion.explanationGu, fontSize = 12.sp, color = colors.inkSecondary)
                         }
                     }
                 }
@@ -250,7 +290,11 @@ fun QuizPlayScreen(
         }
 
         // Coin Pop Overlay Animation
-        if (quizState.showCoinPopAnimation) {
+        AnimatedVisibility(
+            visible = quizState.showCoinPopAnimation,
+            enter = fadeIn() + scaleIn(),
+            exit = fadeOut()
+        ) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()

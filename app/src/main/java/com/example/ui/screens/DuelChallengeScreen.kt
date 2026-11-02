@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -19,7 +20,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.ui.components.CircularTimer
 import com.example.ui.components.GoldCoinIcon
+import com.example.viewmodel.DUEL_SECONDS_PER_QUESTION
 import com.example.ui.theme.DisplayFontFamily
 import com.example.ui.theme.LocalAppColors
 import com.example.viewmodel.DuelPhase
@@ -35,6 +38,8 @@ fun DuelChallengeScreen(
     onBack: () -> Unit
 ) {
     val colors = LocalAppColors.current
+
+    BackHandler(onBack = onBack)
 
     Box(
         modifier = Modifier
@@ -108,6 +113,10 @@ fun DuelChallengeScreen(
                         Text(text = "Waiting for ${duelState.friend?.name ?: "Opponent"} to join...", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = colors.ink)
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(text = "Match starts automatically when accepted", fontSize = 13.sp, color = colors.muted)
+                        Spacer(modifier = Modifier.height(24.dp))
+                        TextButton(onClick = onBack) {
+                            Text("Cancel invite (refund 100 coins)", color = colors.wrongRed)
+                        }
                     }
                 }
             }
@@ -147,7 +156,27 @@ fun DuelChallengeScreen(
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Round ${duelState.currentQuestionIndex + 1} of ${duelState.questions.size}",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = colors.muted
+                        )
+                        CircularTimer(
+                            totalSeconds = DUEL_SECONDS_PER_QUESTION,
+                            currentSeconds = duelState.timerSeconds,
+                            modifier = Modifier.size(44.dp)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
 
                     // Question Card
                     Card(
@@ -165,14 +194,16 @@ fun DuelChallengeScreen(
                     Spacer(modifier = Modifier.height(16.dp))
 
                     // Options
-                    val optionTexts = listOf(q.optionA, q.optionB, q.optionC, q.optionD)
+                    val optionTexts = q.options
                     optionTexts.forEachIndexed { index, optionText ->
                         val isUserPick = duelState.userChoice == index
-                        val isOppPick = duelState.opponentChoice == index
+                        // The opponent's pick stays hidden until the round is revealed.
+                        val isOppPick = duelState.isRevealed && duelState.opponentChoice == index
                         val isCorrect = index == q.correctIndex
 
                         val cardBg = when {
-                            isUserPick && isOppPick -> colors.accentGold.copy(alpha = 0.2f)
+                            duelState.isRevealed && isCorrect -> colors.correctGreen.copy(alpha = 0.18f)
+                            duelState.isRevealed && isUserPick -> colors.wrongRed.copy(alpha = 0.15f)
                             isUserPick -> colors.primaryLight
                             else -> colors.card
                         }
@@ -213,9 +244,23 @@ fun DuelChallengeScreen(
                         }
                     }
 
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    val statusText = when {
+                        duelState.isRevealed && duelState.userChoice == -1 -> "⏱ Time's up — no answer this round"
+                        duelState.isRevealed && duelState.userChoice == q.correctIndex -> "✅ Correct! +10"
+                        duelState.isRevealed -> "❌ Wrong answer"
+                        duelState.userChoice != null -> "Waiting for ${duelState.friend?.name ?: "opponent"} to answer…"
+                        duelState.opponentChoice != null -> "${duelState.friend?.name ?: "Opponent"} has answered — hurry!"
+                        else -> ""
+                    }
+                    if (statusText.isNotEmpty()) {
+                        Text(text = statusText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = colors.inkSecondary)
+                    }
+
                     Spacer(modifier = Modifier.weight(1f))
 
-                    if (duelState.userChoice != null) {
+                    if (duelState.isRevealed) {
                         Button(
                             onClick = onNextQuestion,
                             colors = ButtonDefaults.buttonColors(containerColor = colors.primary),

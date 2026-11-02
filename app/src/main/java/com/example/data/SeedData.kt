@@ -341,6 +341,55 @@ object SeedData {
             ),
             relatedCategoryId = "geography_economy",
             questionCount = 10
+        ),
+        Capsule(
+            id = "cap_panchayati_raj",
+            topic = "Panchayati Raj",
+            readTime = "3-min read",
+            titleEn = "Panchayati Raj in Gujarat",
+            titleGuj = "ગુજરાતમાં પંચાયતી રાજ",
+            tldr = "Three-tier local self-government: Gram, Taluka and Jilla Panchayat.",
+            keyFacts = listOf(
+                "73rd Constitutional Amendment (1992) gave Panchayats constitutional status (Part IX).",
+                "Gujarat Panchayats Act, 1993 governs the present system.",
+                "The Talati cum Mantri is the secretary of the Gram Panchayat.",
+                "Panchayat elections are held every 5 years by the State Election Commission."
+            ),
+            relatedCategoryId = "revenue_talati_gk",
+            questionCount = 6
+        ),
+        Capsule(
+            id = "cap_gujarati_sahitya",
+            topic = "Gujarati Literature",
+            readTime = "4-min read",
+            titleEn = "Pillars of Gujarati Literature",
+            titleGuj = "ગુજરાતી સાહિત્યના સ્તંભ",
+            tldr = "Must-know poets and authors asked in almost every GSSSB & GPSC paper.",
+            keyFacts = listOf(
+                "Narsinh Mehta — 'Adi Kavi', composer of 'Vaishnav Jan To'.",
+                "Kavi Narmad — wrote 'Jay Jay Garavi Gujarat' (1873).",
+                "Govardhanram Tripathi — novel 'Saraswatichandra' in four parts.",
+                "Zaverchand Meghani — 'Rashtriya Shayar', title given by Gandhiji.",
+                "Umashankar Joshi — first Gujarati Jnanpith awardee (1967, 'Nishith')."
+            ),
+            relatedCategoryId = "gujarati_grammar",
+            questionCount = 8
+        ),
+        Capsule(
+            id = "cap_computer_basics",
+            topic = "Computer",
+            readTime = "2-min read",
+            titleEn = "Computer Basics for CCE",
+            titleGuj = "CCE માટે કમ્પ્યુટરની મૂળભૂત બાબતો",
+            tldr = "High-frequency computer questions from GSSSB Clerk & Bin Sachivalay papers.",
+            keyFacts = listOf(
+                "CPU = Central Processing Unit; RAM is volatile, ROM is non-volatile.",
+                "1 KB = 1024 bytes; 1 MB = 1024 KB.",
+                "Ctrl+C copy, Ctrl+V paste, Ctrl+X cut, Ctrl+Z undo.",
+                "In Excel, a cell is the intersection of a row and a column."
+            ),
+            relatedCategoryId = "computer_knowledge",
+            questionCount = 8
         )
     )
 

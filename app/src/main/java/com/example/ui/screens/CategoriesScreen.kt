@@ -17,6 +17,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.QuizCategory
+import com.example.data.CategoryProgressEntity
 import com.example.data.SeedData
 import com.example.ui.components.GoldCoinIcon
 import com.example.ui.components.TopBar
@@ -31,7 +32,8 @@ fun CategoriesScreen(
     onCategoryClick: (QuizCategory) -> Unit,
     onAvatarClick: () -> Unit,
     onStreakClick: () -> Unit,
-    onCoinsClick: () -> Unit
+    onCoinsClick: () -> Unit,
+    progress: Map<String, CategoryProgressEntity> = emptyMap()
 ) {
     val colors = LocalAppColors.current
     var activeFilter by remember { mutableStateOf("All") }
@@ -180,6 +182,14 @@ fun CategoriesScreen(
                                     fontSize = 12.sp,
                                     color = colors.muted
                                 )
+                                progress[cat.id]?.let { p ->
+                                    Text(
+                                        text = "Best ${p.bestScorePercent}% · ${p.quizzesCompleted} played",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = colors.primary
+                                    )
+                                }
                             }
                         }
 
